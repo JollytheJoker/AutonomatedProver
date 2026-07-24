@@ -1,0 +1,14 @@
+# Python Caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+env/
+
+# Betriebssystem-Dateien
+.DS_Store
+Thumbs.db
