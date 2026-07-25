@@ -41,7 +41,7 @@ class Object:
         quantor: Logical quantifier state (Q).
         obj_id: Unique identifier (id).
     """
-    binding_quantity: Tuple[Union['ElementrySet', 'Set'], ...] = field(default_factory=tuple)
+    binding_quantity: Tuple[Union['ElementrySet', 'Set', 'PowerSet'], ...] = field(default_factory=tuple)
     mathematical_quantity: FrozenSet = field(default_factory=frozenset)
     quantor: Quantor = Quantor.DEFINE
     obj_id: int = field(default=0, init=False)
@@ -89,6 +89,42 @@ class Set(Object):
         if self.assosiation:
             return f'{self.assosiation}'
         return f'{self.quantor} Set_{self.obj_id} which is subset of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
+
+
+@dataclass(frozen=True)
+class PowerSet(Object):
+    """A powerSet is a set that contains every subset of a set"""
+
+    def __post_init__(self):
+        super().__post_init__()
+        if len(self.binding_quantity) == 0:
+            raise Exception("Must give at least one binding quantity")
+
+    def __repr__(self):
+        return f'(P, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
+
+    def __str__(self):
+        if self.assosiation:
+            return self.assosiation
+        return f'{self.quantor} PowerSet_{self.obj_id} of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
+
+
+@dataclass(frozen=True)
+class FunctionSet(Object):
+    """A function set is a set that contains every possible mapping from set A to set B"""
+
+    def __post_init__(self):
+        super().__post_init__()
+        if len(self.binding_quantity) != 2:
+            raise Exception("Must give at exactly two binding quantity, one output and one input set")
+
+    def __repr__(self):
+        return f'(FS, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
+
+    def __str__(self):
+        if self.assosiation:
+            return self.assosiation
+        return f'{self.quantor} FunctionSet_{self.obj_id} of functions from {str(self.binding_quantity[0])} to {str(self.binding_quantity[1])}'
 
 
 @dataclass(frozen=True)
