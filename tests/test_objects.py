@@ -1,5 +1,5 @@
 import pytest
-from MObject import ElementrySet, Set, ConcatenatedSet, Variable, Function, Quantor
+from MObject import ElementrySet, Set, PowerSet, FunctionSet, Variable, Function, Quantor
 
 
 def test_object_createion():
@@ -17,14 +17,18 @@ def test_object_createion():
     with pytest.raises(Exception):
         Set(binding_quantity=())
 
-    with pytest.raises(Exception):
-        Set(binding_quantity=(u1, u1))
+    # Power sets
+    p1 = PowerSet(assosiation="P(x)", binding_quantity=(u1, ), quantor=Quantor.DEFINE)
+    assert p1.nested_depth == 1
+    p2 = PowerSet(binding_quantity=(p1, ), quantor=Quantor.DEFINE)
+    assert p2.nested_depth == 2
 
-    # Concatenated sets
-    c1 = ConcatenatedSet(assosiation="XxX", binding_quantity=(u1, u1), quantor=Quantor.DEFINE)
-    assert c1.binding_quantity == (u1, u1)
+    # Function sets
+    f1 = FunctionSet(binding_quantity=(u1, u2), quantor=Quantor.DEFINE)
     with pytest.raises(Exception):
-        ConcatenatedSet(binding_quantity=(u1,))
+        FunctionSet(binding_quantity=(u1, ), quantor=Quantor.DEFINE)
+    with pytest.raises(Exception):
+        FunctionSet(binding_quantity=(), quantor=Quantor.DEFINE)
 
     # Variables
     v1 = Variable(assosiation="x", binding_quantity=(u1,), quantor=Quantor.DEFINE)

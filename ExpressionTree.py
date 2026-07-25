@@ -1,6 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from MObject import Object, Function, Quantor, ConcatenatedSet
+from dataclasses import dataclass, field, replace
+from MObject import Object, Set, ElementrySet, PowerSet, Function, Variable, Quantor, FunctionSet
 from typing import FrozenSet, Tuple
 
 
@@ -10,16 +10,14 @@ class Node:
     One node in the expression tree graph. Contains the child nodes for recursive build up
     """
     math_object: Object
-    node_tuple: Tuple = field(default_factory=tuple)
-    child_nodes: FrozenSet['Node'] = field(default_factory=frozenset)
+    node_object: Object = field(default_factory=Object, init=False)
+    child_nodes: Tuple['Node', ...] = field(default_factory=tuple)
     is_root: bool = field(default=False)
 
     def __post_init__(self):
         if len(self.child_nodes) > 0 and not isinstance(self.math_object, Function):
             raise Exception("Can only call functions")
         if len(self.child_nodes) > 1:
-            if not isinstance(self.math_object.binding_quantity[0], ConcatenatedSet):
-                raise Exception("A function can not have multiple inputs if binding quantity is not concatenated set")
             if len(self.math_object.binding_quantity[0]) != len(self.child_nodes):
                 raise Exception("Function has not the given number of inputs")
 
@@ -31,23 +29,97 @@ class Node:
         Recursively build up the node tuple using the function at the node
         """
         if not self.child_nodes:
-            self.node_tuple = self.math_object.toTuple()
+            self.node_object = self.math_object
             return
 
         quantor = Quantor.FORALL
         for node in self.child_nodes:
             node.set_node_tuple()
             # Update quantor
-            if node.node_tuple[3] == Quantor.DEFINE or node.node_tuple[3] == Quantor.EXISTS:
+            nodeTuple = node.node_object.toTuple()
+            if nodeTuple[3] == Quantor.DEFINE or nodeTuple[3] == Quantor.EXISTS:
                 if quantor != Quantor.EXISTS:
-                    quantor = node.node_tuple[3]
-        self.node_tuple = (self.math_object.binding_quantity[1], self.math_object.binding_quantity[1], self.math_object.binding_quantity, quantor, -1)
+                    quantor = nodeTuple[3]
+
+        # Get the output type by checking if any input is set instead of variable if variable was given. E.g., f(X) will be a set, but the output of x was normally defined as output variables.
+        math_obj_out = self.math_object.binding_quantity[1]
+        if isinstance(math_obj_out, Variable):
+            raise Exception("Can't map onto one variable")
+        elif isinstance(math_obj_out, ElementrySet) or isinstance(math_obj_out, Set):
+            normal_output = Variable(binding_quantity=(math_obj_out, ), quantor=Quantor.FORALL)
+        elif isinstance(math_obj_out, PowerSet):
+            max_nested_depth = max(s.nested_depth if isinstance(s, PowerSet) else 0 for s in math_obj_out.binding_quantity)
+            normal_output = replace(math_obj_out, nested_depth=max_nested_depth - 1) if max_nested_depth > 0 else Set(binding_quantity=math_obj_out.binding_quantity, quantor=Quantor.FORALL)
+        elif isinstance(math_obj_out, FunctionSet):
+            normal_output = Function(binding_quantity=math_obj_out.binding_quantity, quantor=Quantor.FORALL)
+        else:
+            raise Exception(f"Unknown type {type(math_obj_out)}")
+
+        # Test for any change in input
+        math_obj_in = self.math_object.binding_quantity[0]
+        upper_output_type = 0
+        if isinstance(math_obj_in, Variable):
+            raise Exception("Can't map from one variable")
+        if isinstance(math_obj_in, ElementrySet):
+            if len(self.child_nodes) != 1:
+                raise Exception("Must have exactly one child node if elementry set is used")
+            if isinstance(self.child_nodes[0].math_object, PowerSet):
+                upper_output_type = self.child_nodes[0].math_object.nested_depth + 1
+            if isinstance(self.child_nodes[0].math_object, Set) or isinstance(self.child_nodes[0].math_object, ElementrySet):
+                upper_output_type = 1
+        if isinstance(math_obj_in, Set):
+            for i, child_node in enumerate(self.child_nodes):
+                binding_quantity = math_obj_in.binding_quantity[i]
+                child_node_obj = child_node.math_object
+                if type(child_node_obj) != type(binding_quantity):
+                    if isinstance(child_node_obj, Set) and isinstance(binding_quantity, Variable):
+                        upper_output_type = max(upper_output_type, 1)
+                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, Variable):
+                        upper_output_type = max(upper_output_type, 1 + child_node_obj.nested_depth)
+                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, Set):
+                        upper_output_type = max(upper_output_type, child_node_obj.nested_depth)
+                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, PowerSet):
+                        if child_node_obj.nested_depth < binding_quantity.nested_depth:
+                            raise Exception("Input nested depth must be equal or exceed defined nested depth")
+                        upper_output_type = max(upper_output_type, child_node_obj.nested_depth - binding_quantity.nested_depth)
+                    else:
+                        raise Exception("Input must be of higher or same nested depth")
+        if isinstance(math_obj_in, PowerSet):
+            if len(self.child_nodes) != 1:
+                raise Exception("Must have exactly one child node if powerset is used")
+            if not isinstance(self.child_nodes[0].math_object, PowerSet):
+                raise Exception("Input must be of higher or same nested depth")
+            if self.child_nodes[0].math_object.nested_depth < math_obj_in.nested_depth:
+                raise Exception("Input must be of higher or same nested depth")
+            upper_output_type = self.child_nodes[0].math_object.nested_depth - math_obj_in.nested_depth
+
+        if upper_output_type > 0:
+            normal_output = math_obj_out
+        for _ in range(upper_output_type - 1):
+            normal_output = PowerSet(binding_quantity=(normal_output, ), quantor=quantor)
+
+        self.node_object = replace(normal_output, mathematical_quantity=self.math_object.mathematical_quantity, obj_id=-1, quantor=quantor)
+
+    def __eq__(self, other: Node):
+        """
+        Strict equality check in every single attribute
+        """
+        if self.math_object != other.math_object:
+            return False
+        if self.child_nodes == other.child_nodes:
+            return True
+        return False
 
     def primitive_eq(self, other: Node):
         """
         Runs premitive equal check between two nodes. They are equal if type and binding quantity are the same
         """
-        return self.node_tuple[0] == other.node_tuple[0] and self.node_tuple[1] == other.node_tuple[1]
+        # Two functional applicationa can only equal if they also are equal
+        if self.node_object.obj_id == other.node_object.obj_id == -1:
+            return self == other
+        if self.node_object.obj_id == -1 or other.node_object.obj_id == -1:
+            return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity
+        return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity and self.node_object.obj_id == other.node_object.obj_id
 
     def primitive_contains(self, other: Node):
         """
@@ -60,4 +132,4 @@ class Node:
                 yield res
 
     def __hash__(self):
-        return hash(self.node_tuple)
+        return hash(self.node_object.toTuple())

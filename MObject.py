@@ -25,7 +25,7 @@ _ID_COUNTER: Dict[Tuple[Tuple[Object, ...], FrozenSet, Quantor], int] = {}
 def _generate_id(binding: Tuple[Object, ...], math_cond: FrozenSet, quantor: Quantor) -> int:
     key = (binding, math_cond, quantor)
     if key not in _ID_COUNTER:
-        _ID_COUNTER[key] = 0
+        _ID_COUNTER[key] = 1
     else:
         _ID_COUNTER[key] += 1
     return _ID_COUNTER[key]
@@ -41,21 +41,27 @@ class Object:
         quantor: Logical quantifier state (Q).
         obj_id: Unique identifier (id).
     """
-    binding_quantity: Tuple[Union['ElementrySet', 'Set', 'PowerSet'], ...] = field(default_factory=tuple)
+    binding_quantity: Tuple[Union['ElementrySet', 'Set', 'PowerSet', 'FunctionSet'], ...] = field(default_factory=tuple)
     mathematical_quantity: FrozenSet = field(default_factory=frozenset)
     quantor: Quantor = Quantor.DEFINE
-    obj_id: int = field(default=0, init=False)
+    obj_id: int = field(default=0)
     assosiation: str = ''
 
     def __post_init__(self):
-        generated_id = _generate_id(self.binding_quantity, self.mathematical_quantity, self.quantor)
-        object.__setattr__(self, 'obj_id', generated_id)
+        if self.obj_id == 0:
+            generated_id = _generate_id(self.binding_quantity, self.mathematical_quantity, self.quantor)
+            object.__setattr__(self, 'obj_id', generated_id)
 
     def toTuple(self) -> Tuple:
         """
         :return: Tuple of the objects abstract representation (type, binding_quantity, mathematical_quantity, quantor, id).
         """
         return type(self), self.binding_quantity, self.mathematical_quantity, self.quantor, self.obj_id
+
+    def __eq__(self, other: Object) -> bool:
+        if type(self) != type(other):
+            return False
+        return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor and self.obj_id == other.obj_id
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,8 @@ class ElementrySet(Object):
             return f'{self.assosiation}'
         return f'Urmenge_{self.obj_id}'
 
+    def __len__(self):
+        return 1
 
 @dataclass(frozen=True)
 class Set(Object):
@@ -90,15 +98,20 @@ class Set(Object):
             return f'{self.assosiation}'
         return f'{self.quantor} Set_{self.obj_id} which is subset of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
 
+    def __len__(self):
+        return len(self.binding_quantity)
 
 @dataclass(frozen=True)
 class PowerSet(Object):
     """A powerSet is a set that contains every subset of a set"""
+    nested_depth: int = 0
 
     def __post_init__(self):
         super().__post_init__()
         if len(self.binding_quantity) == 0:
             raise Exception("Must give at least one binding quantity")
+        if self.nested_depth == 0:
+            object.__setattr__(self, 'nested_depth', max(s.nested_depth if isinstance(s, PowerSet) else 0 for s in self.binding_quantity) + 1)
 
     def __repr__(self):
         return f'(P, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
@@ -108,6 +121,8 @@ class PowerSet(Object):
             return self.assosiation
         return f'{self.quantor} PowerSet_{self.obj_id} of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
 
+    def __len__(self):
+        return 1
 
 @dataclass(frozen=True)
 class FunctionSet(Object):
@@ -126,6 +141,8 @@ class FunctionSet(Object):
             return self.assosiation
         return f'{self.quantor} FunctionSet_{self.obj_id} of functions from {str(self.binding_quantity[0])} to {str(self.binding_quantity[1])}'
 
+    def __len__(self):
+        return 1
 
 @dataclass(frozen=True)
 class Variable(Object):
