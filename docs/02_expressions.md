@@ -1,4 +1,4 @@
-# 01. Grammatik und Syntax
+# 02. Terme
 
 ## 1. Motivation
 Um komplexere Eigenschaften und Konkatenationen dargestellt zu können, müssen wir Objekte verknüpfen können.
