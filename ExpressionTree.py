@@ -4,6 +4,7 @@ from MObject import Object, Function, Quantor, ConcatenatedSet
 from typing import FrozenSet, Tuple
 
 
+@dataclass
 class Node:
     """
     One node in the expression tree graph. Contains the child nodes for recursive build up
@@ -31,6 +32,7 @@ class Node:
         """
         if not self.child_nodes:
             self.node_tuple = self.math_object.toTuple()
+            return
 
         quantor = Quantor.FORALL
         for node in self.child_nodes:
@@ -57,3 +59,5 @@ class Node:
             for res in child_node.primitive_contains(other):
                 yield res
 
+    def __hash__(self):
+        return hash(self.node_tuple)
