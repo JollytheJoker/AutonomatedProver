@@ -11,8 +11,8 @@ class Quantor(Enum):
 
     def min(self, other: 'Quantor') -> 'Quantor' | None:
         """
-        Returns the reduced quantor of both (e.g. min(for all, exists) => exists).
-        If none of the quantors is for all it will return None, since we can't garentee a match
+        Returns the reduced quantor of both (e.g., min (for all, exists) => exists).
+        If none of the quantors is for all, it will return None, since we can't garentee a match
         """
         if self == Quantor.FORALL and other == Quantor.FORALL:
             return Quantor.FORALL
@@ -41,7 +41,7 @@ class Object:
         quantor: Logical quantifier state (Q).
         obj_id: Unique identifier (id).
     """
-    binding_quantity: Tuple[Union['ElementrySet', 'Set', 'ConcatenatedSet'], ...] = field(default_factory=tuple)
+    binding_quantity: Tuple[Union['ElementrySet', 'Set'], ...] = field(default_factory=tuple)
     mathematical_quantity: FrozenSet = field(default_factory=frozenset)
     quantor: Quantor = Quantor.DEFINE
     obj_id: int = field(default=0, init=False)
@@ -75,12 +75,12 @@ class ElementrySet(Object):
 
 @dataclass(frozen=True)
 class Set(Object):
-    """A set, which is contained in another set, which binding quantites must have size 1"""
+    """A set, which is contained in another set or in the cross-product of other sets"""
 
     def __post_init__(self):
         super().__post_init__()
-        if len(self.binding_quantity) != 1:
-            raise Exception("Must give exactly one binding quantity, one upper set")
+        if len(self.binding_quantity) == 0:
+            raise Exception("Must give at least one binding quantity")
 
     def __repr__(self):
         return f'(M, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
@@ -88,27 +88,7 @@ class Set(Object):
     def __str__(self):
         if self.assosiation:
             return f'{self.assosiation}'
-        return f'{self.quantor} Set_{self.obj_id} which is subset of {str(self.binding_quantity[0])}'
-
-
-@dataclass(frozen=True)
-class ConcatenatedSet(Object):
-    """A set that creates the cross product of multiple sets. It's binding quantities thus have size > 1"""
-    def __post_init__(self):
-        super().__post_init__()
-        if len(self.binding_quantity) < 2:
-            raise Exception("Concatenated set must include at least 2 elements in binding quantaties.")
-        
-    def __repr__(self):
-        return f'(C, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
-
-    def __str__(self):
-        if self.assosiation:
-            return self.assosiation
-        return f'{self.quantor} {'x'.join(str(s) for s in self.binding_quantity)}'
-
-    def __len__(self) -> int:
-        return len(self.binding_quantity)
+        return f'{self.quantor} Set_{self.obj_id} which is subset of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
 
 
 @dataclass(frozen=True)
