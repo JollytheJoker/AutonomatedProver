@@ -22,7 +22,7 @@ Wir unterteilen hierbei in Funktionen, Mengen und Variablen.
 Formal müsste man zunächst mathematisch bedingungslose Objekte (also $\mathcal{M}=\{\}$) um damit Ausdrücke wie später zu definieren, um dann Objekte mit Ausdrücken zu definieren. Jedoch können diese in eine Menge eingebettet werden.
 
 ## 3. Übersicht der mathematischen Objekte
-In der Implementierung definieren mathematische objekte als statische Objekte mit eigenschaften $(\mathcal{B}, \mathcal{M}, \mathcal{Q}, \mathrm{id})$; für lesbarkeit fürgen wir das Attribut eines Assoziations-String hinzu. Der $\mathcal{T}$ wird als Vererbung auf vier unter Klassen verteilt. Ferner definieren wir potenzmengen als weiteres Objekt, um Mengen von Mengen effizient abbilden zu können.
+In der Implementierung definieren mathematische objekte als statische Objekte mit eigenschaften $(\mathcal{B}, \mathcal{M}, \mathcal{Q}, \mathrm{id})$; für lesbarkeit fürgen wir das Attribut eines Assoziations-String hinzu. Der $\mathcal{T}$ wird als Vererbung auf vier unter Klassen verteilt. Ferner definieren wir Potenzmengen & Funktionsmengen als weitere Objekte, um Mengen von Mengen oder Mengen von Funktionen effizient abbilden zu können.
 
 ## 4. Beispiel
 Wir assozierien & definieren $(\mathscr{U}, \{\}, \{\}, D, 0)$ mit dem Namen X als Urmenge. Ferner sei $(\mathscr{U}, \{\}, \{\}, D, 1)$ mit Y assoziert. Sei nun A mit $(\mathscr{M}, ((\mathscr{U}, \{\}, \{\}, D, 0)), \{\}, 0)$ assoziert (es ist also $A \subseteq X$). Eine Funktion $f: A\rightarrow Y$ ist dann $(\mathscr{F}, ((\mathscr{M}, ((\mathscr{U}, \{\}, \{\}, D, 0)), \{\}, 0), (\mathscr{U}, \{\}, \{\}, D, 1)), \{\}, 0)$, oder (für lesbarkeit) $(\mathscr{F}, (A, Y), \{\}, 0)$.
