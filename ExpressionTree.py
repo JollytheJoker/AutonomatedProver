@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from MObject import Object, Set, ElementrySet, PowerSet, Function, Variable, Quantor, FunctionSet
-from typing import FrozenSet, Tuple
+from typing import Tuple, Dict, List
 
 
 @dataclass
@@ -11,7 +11,7 @@ class Node:
     """
     math_object: Object
     node_object: Object = field(default_factory=Object, init=False)
-    child_nodes: Tuple['Node', ...] = field(default_factory=tuple)
+    child_nodes: List['Node'] = field(default_factory=list)
     is_root: bool = field(default=False)
 
     def __post_init__(self):
@@ -23,6 +23,22 @@ class Node:
 
         self.object_tuple = self.math_object.toTuple()
         self.set_node_tuple()
+
+    def __eq__(self, other: Node):
+        """
+        Strict equality check in every single attribute
+        """
+        if self.math_object != other.math_object:
+            return False
+        if self.child_nodes == other.child_nodes:
+            return True
+        return False
+
+    def __copy__(self) -> 'Node':
+        return Node(math_object=self.math_object, child_nodes=self.child_nodes, is_root=self.is_root)
+
+    def __hash__(self):
+        return hash(self.node_object.toTuple())
 
     def set_node_tuple(self):
         """
@@ -82,8 +98,6 @@ class Node:
                         if child_node_obj.nested_depth < binding_quantity.nested_depth:
                             raise Exception("Input nested depth must be equal or exceed defined nested depth")
                         upper_output_type = max(upper_output_type, child_node_obj.nested_depth - binding_quantity.nested_depth)
-                    else:
-                        raise Exception("Input must be of higher or same nested depth")
         if isinstance(math_obj_in, PowerSet):
             if len(self.child_nodes) != 1:
                 raise Exception("Must have exactly one child node if powerset is used")
@@ -99,16 +113,6 @@ class Node:
             normal_output = PowerSet(binding_quantity=(normal_output, ), quantor=quantor)
 
         self.node_object = replace(normal_output, mathematical_quantity=self.math_object.mathematical_quantity, obj_id=-1, quantor=quantor)
-
-    def __eq__(self, other: Node):
-        """
-        Strict equality check in every single attribute
-        """
-        if self.math_object != other.math_object:
-            return False
-        if self.child_nodes == other.child_nodes:
-            return True
-        return False
 
     def primitive_eq(self, other: Node):
         """
@@ -131,5 +135,31 @@ class Node:
             for res in child_node.primitive_contains(other):
                 yield res
 
-    def __hash__(self):
-        return hash(self.node_object.toTuple())
+    def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = {}) -> Tuple[Dict[Node, Node], bool]:
+        """
+        Recursively checks what nodes had to be replaced if other would be applied
+        """
+        if self.math_object != other.math_object:
+            return mapping, False
+
+        for i, (self_node, other_node) in enumerate(zip(self.child_nodes, other.child_nodes)):
+            if self_node != other_node:
+                if self_node.node_object.quantor >= other_node.node_object.quantor:
+                    mapping[self_node] = other_node
+                else:
+                    return mapping, False
+            else:
+                mapping, possible = self_node.get_mappings_dict_for_replacement(other_node, mapping)
+                if not possible:
+                    return mapping, False
+
+        return mapping, True
+
+    def remap_objects(self, mapping: Dict[Node, Node]) -> Node:
+        if self in mapping:
+            return mapping[self]
+        copy_node = self.__copy__()
+        for i, child_node in enumerate(self.child_nodes):
+            if child_node in mapping.keys():
+                copy_node.child_nodes[i] = mapping[child_node]
+        return copy_node
