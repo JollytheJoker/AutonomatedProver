@@ -20,6 +20,17 @@ class Quantor(Enum):
             return None
         return self if other == Quantor.FORALL else other
 
+    def __ge__(self, other: 'Quantor') -> bool:
+        """
+        Return true if self is FORALL
+        """
+        return self == Quantor.FORALL
+
+    def __le__(self, other: 'Quantor') -> bool:
+        """
+        Return true if other is FORALL
+        """
+        return self == Quantor.FORALL
 
 _ID_COUNTER: Dict[Tuple[Tuple[Object, ...], FrozenSet, Quantor], int] = {}
 def _generate_id(binding: Tuple[Object, ...], math_cond: FrozenSet, quantor: Quantor) -> int:
@@ -61,8 +72,10 @@ class Object:
     def __eq__(self, other: Object) -> bool:
         if type(self) != type(other):
             return False
-        return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor and self.obj_id == other.obj_id
-
+        # Only check for id's if any object was defined
+        if self.quantor == Quantor.DEFINE or other.quantor == Quantor.DEFINE:
+            return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor and self.obj_id == other.obj_id
+        return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor
 
 @dataclass(frozen=True)
 class ElementrySet(Object):

@@ -19,7 +19,7 @@ def test_non_function_with_children_raises():
     child_node = Node(math_object=u)
 
     with pytest.raises(Exception, match="Can only call functions"):
-        Node(math_object=u, child_nodes=(child_node, ))
+        Node(math_object=u, child_nodes=[child_node])
 
 def test_function_wrong_input_length_raises():
     """Test that the number of children must be the same length of the ConcatenatedSet."""
@@ -36,7 +36,7 @@ def test_function_wrong_input_length_raises():
     child2 = Node(math_object=u2)
 
     with pytest.raises(Exception, match="Function has not the given number of inputs"):
-        Node(math_object=f, child_nodes=(child1, child2))
+        Node(math_object=f, child_nodes=[child1, child2])
 
 
 def test_node_tuple_creation():
@@ -45,14 +45,14 @@ def test_node_tuple_creation():
     x1 = Variable(assosiation="x", binding_quantity=(u1,), quantor=Quantor.DEFINE)
 
     node_x = Node(math_object=x1)
-    node_f = Node(math_object=f1, child_nodes=(node_x, ))
+    node_f = Node(math_object=f1, child_nodes=[node_x])
     assert node_f.node_object == Variable(binding_quantity=(u1, ), quantor=Quantor.DEFINE, obj_id=-1)
 
-    node_f_of_u1 = Node(math_object=f1, child_nodes=(Node(u1), ))
+    node_f_of_u1 = Node(math_object=f1, child_nodes=[Node(u1)])
     assert node_f_of_u1.node_object == replace(u1, obj_id=-1)
 
     p1 = PowerSet(binding_quantity=(u1, ), quantor=Quantor.DEFINE)
-    node_f_of_p1 = Node(math_object=f1, child_nodes=(Node(p1), ))
+    node_f_of_p1 = Node(math_object=f1, child_nodes=[Node(p1)])
     assert isinstance(node_f_of_p1.node_object, PowerSet)
 
 def test_primitive_eq():
@@ -70,7 +70,7 @@ def test_primitive_eq():
     y1 = Variable(assosiation="y", binding_quantity=(u2,), quantor=Quantor.DEFINE)
 
     node_x = Node(math_object=x1)
-    node_f = Node(math_object=f1, child_nodes=(node_x, ))
+    node_f = Node(math_object=f1, child_nodes=[node_x])
     node_y = Node(math_object=y1)
 
     assert node_f.primitive_eq(node_y) is True
