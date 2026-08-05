@@ -76,20 +76,20 @@ def test_statement_application():
     epsilon = Variable(quantor=Quantor.FORALL, binding_quantity=(R, ))
     delta = Variable(quantor=Quantor.EXISTS, binding_quantity=(R, ))
 
-    expr1 = Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(y)])])     # g(B_{delta}^{dy}(y))
-    expr2 = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(y)])])   # B_{epsilon}^{dz}(g(y))
-    term = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(f, child_nodes=[Node(x)])])])  # B_{epsilon}^{dz}(g(f(x)))
+    g_continuity_left = Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(y)])])     # g(B_{delta}^{dy}(y))
+    g_continuity_right = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(y)])])   # B_{epsilon}^{dz}(g(y))
+    gf_continuity_right = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(f, child_nodes=[Node(x)])])])  # B_{epsilon}^{dz}(g(f(x)))
 
-    statement = Statement(expression1=expr1, expression2=expr2, relation=Relation.SUBSET)
+    g_continuous = Statement(expression1=g_continuity_left, expression2=g_continuity_right, relation=Relation.SUBSET)
 
-    res = next(statement.apply_inverse(term))
-    assert res == Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(f, child_nodes=[Node(x)])])])
+    applied_g_term = next(g_continuous.apply_inverse(gf_continuity_right))
+    assert applied_g_term == Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(f, child_nodes=[Node(x)])])])
 
-    expr1_f = Node(f, child_nodes=[Node(Bx, child_nodes=[Node(dx), Node(delta), Node(x)])])  # f(B_{delta}^{dx}(x))
-    expr2_f = Node(By, child_nodes=[Node(dy), Node(epsilon), Node(f, child_nodes=[Node(x)])])  # B_{epsilon}^{dy}(f(x))
+    f_continuity_right = Node(f, child_nodes=[Node(Bx, child_nodes=[Node(dx), Node(delta), Node(x)])])  # f(B_{delta}^{dx}(x))
+    f_continuity_left = Node(By, child_nodes=[Node(dy), Node(epsilon), Node(f, child_nodes=[Node(x)])])  # B_{epsilon}^{dy}(f(x))
 
-    statement_f = Statement(expression1=expr1_f, expression2=expr2_f, relation=Relation.SUBSET)
-    res_2 = next(statement_f.apply_inverse(res))
-    print(res_2)
+    f_continuous = Statement(expression1=f_continuity_right, expression2=f_continuity_left, relation=Relation.SUBSET)
+    applied_gf_term = next(f_continuous.apply_inverse(applied_g_term))
+    assert applied_gf_term == Node(g, child_nodes=[Node(f, child_nodes=[Node(Bx, child_nodes=[Node(dx), Node(delta), Node(x)])])])
 
 

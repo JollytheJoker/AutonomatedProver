@@ -136,18 +136,15 @@ class Node:
             return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity
         return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity and self.node_object.obj_id == other.node_object.obj_id
 
-    def primitive_contains(self, other: Node, return_self: bool = True) -> Generator[Node]:
+    def primitive_contains(self, other: Node) -> Generator[Node, Node]:
         """
-        Runs primitive recursive check on tree structure to yield possible equal nodes.
+        Runs primitive recursive check on tree structure to yield possible equal nodes as well as parent nodes.
         """
         if self.primitive_eq(other):
-            if return_self:
-                yield self
-            else:
-                yield other
+            yield self, None
         for child_node in self.child_nodes:
             for res in child_node.primitive_contains(other):
-                yield res
+                yield res[0], self
 
     def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = None) -> Tuple[Dict[Node, Node], bool]:
         """
