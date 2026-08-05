@@ -13,6 +13,7 @@ def test_leaf_node_creation():
     assert len(node.child_nodes) == 0
     assert node.node_object == u
 
+
 def test_non_function_with_children_raises():
     """Test that you can't assign a child node to a non-function"""
     u = ElementrySet(assosiation="X")
@@ -20,6 +21,7 @@ def test_non_function_with_children_raises():
 
     with pytest.raises(Exception, match="Can only call functions"):
         Node(math_object=u, child_nodes=[child_node])
+
 
 def test_function_wrong_input_length_raises():
     """Test that the number of children must be the same length of the ConcatenatedSet."""
@@ -46,14 +48,15 @@ def test_node_tuple_creation():
 
     node_x = Node(math_object=x1)
     node_f = Node(math_object=f1, child_nodes=[node_x])
-    assert node_f.node_object == Variable(binding_quantity=(u1, ), quantor=Quantor.DEFINE, obj_id=-1)
+    assert node_f.node_object == Variable(binding_quantity=(u1, ), quantor=Quantor.EXISTS, obj_id=-1)
 
     node_f_of_u1 = Node(math_object=f1, child_nodes=[Node(u1)])
-    assert node_f_of_u1.node_object == replace(u1, obj_id=-1)
+    assert node_f_of_u1.node_object == replace(u1, obj_id=-1, quantor=Quantor.EXISTS)
 
     p1 = PowerSet(binding_quantity=(u1, ), quantor=Quantor.DEFINE)
     node_f_of_p1 = Node(math_object=f1, child_nodes=[Node(p1)])
     assert isinstance(node_f_of_p1.node_object, PowerSet)
+
 
 def test_primitive_eq():
     """Test the primitive equality logic between two identical nodes."""

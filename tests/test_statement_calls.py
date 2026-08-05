@@ -56,31 +56,40 @@ def test_mapping_invalid_quantor_substitution():
     mapping, is_valid = node_concrete.get_mappings_dict_for_replacement(node_x)
     assert is_valid is False
 
+
 def test_statement_application():
     """Tests with an example"""
-    X = ElementrySet(quantor=Quantor.DEFINE)
-    Y = ElementrySet(quantor=Quantor.DEFINE)
-    Z = ElementrySet(quantor=Quantor.DEFINE)
-    R = ElementrySet(quantor=Quantor.DEFINE)
-    dx = Function(quantor=Quantor.DEFINE, binding_quantity=(X, X))
-    dy = Function(quantor=Quantor.DEFINE, binding_quantity=(Y, Y))
-    dz = Function(quantor=Quantor.DEFINE, binding_quantity=(Z, Z))
-    f = Function(quantor=Quantor.FORALL, binding_quantity=(X, Y))
-    g = Function(quantor=Quantor.FORALL, binding_quantity=(Y, Z))
-    x = Variable(quantor=Quantor.FORALL, binding_quantity=(X, ))
-    y = Variable(quantor=Quantor.FORALL, binding_quantity=(Y, ))
-    Bx = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(X, X)), R, X)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(X, ))))
-    By = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(Y, Y)), R, Y)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(Y, ))))
-    Bz = Bx = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(Z, Z)), R, Z)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(Z, ))))
+    X = ElementrySet(quantor=Quantor.DEFINE, assosiation='X')
+    Y = ElementrySet(quantor=Quantor.DEFINE, assosiation='Y')
+    Z = ElementrySet(quantor=Quantor.DEFINE, assosiation='Z')
+    R = ElementrySet(quantor=Quantor.DEFINE, assosiation='R')
+    dx = Function(quantor=Quantor.DEFINE, binding_quantity=(X, X), assosiation='dx')
+    dy = Function(quantor=Quantor.DEFINE, binding_quantity=(Y, Y), assosiation='dy')
+    dz = Function(quantor=Quantor.DEFINE, binding_quantity=(Z, Z), assosiation='dz')
+    f = Function(quantor=Quantor.FORALL, binding_quantity=(X, Y), assosiation='f')
+    g = Function(quantor=Quantor.FORALL, binding_quantity=(Y, Z), assosiation='g')
+    x = Variable(quantor=Quantor.FORALL, binding_quantity=(X, ), assosiation='x')
+    y = Variable(quantor=Quantor.FORALL, binding_quantity=(Y, ), assosiation='y')
+    Bx = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(X, X)), R, X)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(X, ))), assosiation='B_{dx}')
+    By = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(Y, Y)), R, Y)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(Y, ))), assosiation='B_{dy}')
+    Bz = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(Z, Z)), R, Z)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(Z, ))), assosiation='B_{dz}')
     epsilon = Variable(quantor=Quantor.FORALL, binding_quantity=(R, ))
     delta = Variable(quantor=Quantor.EXISTS, binding_quantity=(R, ))
 
-    expr1 = Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(y)])])
-    expr2 = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(y)])])
-    f_term = Node(By, child_nodes=[Node(dy), Node(epsilon), Node(f, child_nodes=[Node(x)])])
+    expr1 = Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(y)])])     # g(B_{delta}^{dy}(y))
+    expr2 = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(y)])])   # B_{epsilon}^{dz}(g(y))
+    term = Node(Bz, child_nodes=[Node(dz), Node(epsilon), Node(g, child_nodes=[Node(f, child_nodes=[Node(x)])])])  # B_{epsilon}^{dz}(g(f(x)))
 
     statement = Statement(expression1=expr1, expression2=expr2, relation=Relation.SUBSET)
 
-    res = statement(f_term)
-    assert res != f_term
+    res = next(statement.apply_inverse(term))
+    assert res == Node(g, child_nodes=[Node(By, child_nodes=[Node(dy), Node(delta), Node(f, child_nodes=[Node(x)])])])
+
+    expr1_f = Node(f, child_nodes=[Node(Bx, child_nodes=[Node(dx), Node(delta), Node(x)])])  # f(B_{delta}^{dx}(x))
+    expr2_f = Node(By, child_nodes=[Node(dy), Node(epsilon), Node(f, child_nodes=[Node(x)])])  # B_{epsilon}^{dy}(f(x))
+
+    statement_f = Statement(expression1=expr1_f, expression2=expr2_f, relation=Relation.SUBSET)
+    res_2 = next(statement_f.apply_inverse(res))
+    print(res_2)
+
 

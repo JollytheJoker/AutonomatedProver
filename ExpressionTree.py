@@ -24,6 +24,13 @@ class Node:
         self.object_tuple = self.math_object.toTuple()
         self.set_node_tuple()
 
+    def __str__(self) -> str:
+        """Recursively prints the node and its children in a tree structure"""
+        if self.child_nodes:
+            child_str = ', '.join(str(child) for child in self.child_nodes)
+            return f'{self.math_object}({child_str})'
+        return f'{self.math_object}'
+
     def __eq__(self, other: Node):
         """
         Strict equality check in every single attribute
@@ -54,8 +61,7 @@ class Node:
             # Update quantor
             nodeTuple = node.node_object.toTuple()
             if nodeTuple[3] == Quantor.DEFINE or nodeTuple[3] == Quantor.EXISTS:
-                if quantor != Quantor.EXISTS:
-                    quantor = nodeTuple[3]
+                quantor = Quantor.EXISTS
 
         # Get the output type by checking if any input is set instead of variable if variable was given. E.g., f(X) will be a set, but the output of x was normally defined as output variables.
         math_obj_out = self.math_object.binding_quantity[1]
@@ -116,34 +122,44 @@ class Node:
 
     def primitive_eq(self, other: Node):
         """
-        Runs premitive equal check between two nodes. They are equal if type and binding quantity are the same
+        Runs primitive equal check between two nodes. They are equal if type and binding quantity are the same
         """
-        # Two functional applicationa can only equal if they also are equal
+        # Two functional application can only equal if their functions are equal and child_nodes are primitively equal
         if self.node_object.obj_id == other.node_object.obj_id == -1:
-            return self == other
+            if self.math_object == other.math_object:
+                for self_child, other_child in zip(self.child_nodes, other.child_nodes):
+                    if not self_child.primitive_eq(other_child):
+                        return False
+                return True
+            return False
         if self.node_object.obj_id == -1 or other.node_object.obj_id == -1:
             return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity
         return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity and self.node_object.obj_id == other.node_object.obj_id
 
-    def primitive_contains(self, other: Node):
+    def primitive_contains(self, other: Node, return_self: bool = True) -> Generator[Node]:
         """
-        Runs premitive recursive check on tree structure to yield possible equal nodes.
+        Runs primitive recursive check on tree structure to yield possible equal nodes.
         """
         if self.primitive_eq(other):
-            yield self
+            if return_self:
+                yield self
+            else:
+                yield other
         for child_node in self.child_nodes:
             for res in child_node.primitive_contains(other):
                 yield res
 
-    def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = {}) -> Tuple[Dict[Node, Node], bool]:
+    def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = None) -> Tuple[Dict[Node, Node], bool]:
         """
         Recursively checks what nodes had to be replaced if other would be applied
         """
+        if not mapping:
+            mapping = {}
         if self.math_object != other.math_object:
             return mapping, False
 
         for i, (self_node, other_node) in enumerate(zip(self.child_nodes, other.child_nodes)):
-            if self_node != other_node:
+            if self_node.math_object != other_node.math_object:
                 if self_node.node_object.quantor >= other_node.node_object.quantor:
                     mapping[self_node] = other_node
                 else:
@@ -158,8 +174,10 @@ class Node:
     def remap_objects(self, mapping: Dict[Node, Node]) -> Node:
         if self in mapping:
             return mapping[self]
+
+        new_children = [child.remap_objects(mapping) for child in self.child_nodes]
+
         copy_node = self.__copy__()
-        for i, child_node in enumerate(self.child_nodes):
-            if child_node in mapping.keys():
-                copy_node.child_nodes[i] = mapping[child_node]
+        copy_node.child_nodes = new_children
+
         return copy_node

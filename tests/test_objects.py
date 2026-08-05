@@ -2,9 +2,9 @@ import pytest
 from MObject import ElementrySet, Set, PowerSet, FunctionSet, Variable, Function, Quantor
 
 
-def test_object_createion():
+def test_object_creation():
     """Tests if all objects are created correctly"""
-    # Elementry Sets
+    # Elementary Sets
     u1 = ElementrySet(assosiation="X")
     assert u1.assosiation == "X"
     assert u1.binding_quantity == ()
