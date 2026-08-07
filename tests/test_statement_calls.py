@@ -92,4 +92,3 @@ def test_statement_application():
     applied_gf_term = next(f_continuous.apply_inverse(applied_g_term))
     assert applied_gf_term == Node(g, child_nodes=[Node(f, child_nodes=[Node(Bx, child_nodes=[Node(dx), Node(delta), Node(x)])])])
 
-
