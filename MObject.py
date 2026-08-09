@@ -32,7 +32,10 @@ class Quantor(Enum):
         """
         return self == Quantor.FORALL
 
+
 _ID_COUNTER: Dict[Tuple[Tuple[Object, ...], FrozenSet, Quantor], int] = {}
+
+
 def _generate_id(binding: Tuple[Object, ...], math_cond: FrozenSet, quantor: Quantor) -> int:
     key = (binding, math_cond, quantor)
     if key not in _ID_COUNTER:
@@ -77,6 +80,7 @@ class Object:
             return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor and self.obj_id == other.obj_id
         return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor
 
+
 @dataclass(frozen=True)
 class ElementrySet(Object):
     """An elementary base set with empty binding requirements."""
@@ -93,6 +97,7 @@ class ElementrySet(Object):
 
     def __len__(self):
         return 1
+
 
 @dataclass(frozen=True)
 class Set(Object):
@@ -114,6 +119,7 @@ class Set(Object):
     def __len__(self):
         return len(self.binding_quantity)
 
+
 @dataclass(frozen=True)
 class PowerSet(Object):
     """A powerSet is a set that contains every subset of a set"""
@@ -124,7 +130,8 @@ class PowerSet(Object):
         if len(self.binding_quantity) == 0:
             raise Exception("Must give at least one binding quantity")
         if self.nested_depth == 0:
-            object.__setattr__(self, 'nested_depth', max(s.nested_depth if isinstance(s, PowerSet) else 0 for s in self.binding_quantity) + 1)
+            object.__setattr__(self, 'nested_depth',
+                               max(s.nested_depth if isinstance(s, PowerSet) else 0 for s in self.binding_quantity) + 1)
 
     def __repr__(self):
         return f'(P, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
@@ -136,6 +143,7 @@ class PowerSet(Object):
 
     def __len__(self):
         return 1
+
 
 @dataclass(frozen=True)
 class FunctionSet(Object):
@@ -156,6 +164,7 @@ class FunctionSet(Object):
 
     def __len__(self):
         return 1
+
 
 @dataclass(frozen=True)
 class Variable(Object):
@@ -191,4 +200,3 @@ class Function(Object):
         if self.assosiation:
             return f'{self.assosiation}'
         return f'{self.quantor} Function_{self.obj_id}: {str(self.binding_quantity[0])} -> {str(self.binding_quantity[1])}'
-

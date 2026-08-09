@@ -4,6 +4,11 @@ from ExpressionTree import Node
 from MObject import Function, ElementrySet, Set, PowerSet, FunctionSet, Quantor, Variable
 from Statement import Relation, Statement
 
+# GENERAL GLOBAL DEFINITIONS
+definitions = {
+    "reels": ElementrySet(quantor=Quantor.DEFINE, assosiation='R')
+}
+
 
 def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
     """ Puts the new_child at the most inner node if there is always at most 1 child"""
@@ -16,20 +21,27 @@ def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
     current.child_nodes = [new_child]
     return copied_root
 
-def ball_func(on_set: Union[ElementrySet, Set, PowerSet, FunctionSet], reel_nums: ElementrySet):
-    return Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(on_set, on_set)), reel_nums, on_set)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(on_set, ))), assosiation=f'B_{"{"}{str(on_set.assosiation)}{"}"}')
+
+def ball_func(on_set: Union[ElementrySet, Set, PowerSet, FunctionSet]):
+    """ A ball function for a given set """
+    # Check if this ball function was added to definitions
+    if f'B_{"{"}{str(on_set.assosiation)}{"}"}' in definitions.keys():
+        return definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}']
+    else:
+        definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}'] = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(on_set, on_set)), definitions["reels"], on_set)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(on_set, ))), assosiation=f'B_{"{"}{str(on_set.assosiation)}{"}"}')
+    return definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}']
 
 
-def continuous(func: Function | Node, metr_input: Function, metr_output: Function, real_nums: ElementrySet):
+def continuous(func: Function | Node, metr_input: Function, metr_output: Function):
     """ Returns a statement such that the node is continuous """
     if isinstance(func, Function):
         func = Node(func)
     in_set = metr_input.binding_quantity[0]
     out_set = metr_output.binding_quantity[0]
-    B_in = ball_func(in_set, real_nums)
-    B_out = ball_func(out_set, real_nums)
-    epsilon = Variable(quantor=Quantor.FORALL, binding_quantity=(real_nums,))
-    delta = Variable(quantor=Quantor.EXISTS, binding_quantity=(real_nums,))
+    B_in = ball_func(in_set)
+    B_out = ball_func(out_set)
+    epsilon = Variable(quantor=Quantor.FORALL, binding_quantity=(definitions['reels'],))
+    delta = Variable(quantor=Quantor.EXISTS, binding_quantity=(definitions['reels'],))
     point = Variable(quantor=Quantor.FORALL, binding_quantity=(in_set, ))
 
     # We want to put the point as a parameter for the most inner function

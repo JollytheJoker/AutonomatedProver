@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from MObject import Object, Set, ElementrySet, PowerSet, Function, Variable, Quantor, FunctionSet
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Generator
 
 
 @dataclass
@@ -120,49 +120,72 @@ class Node:
 
         self.node_object = replace(normal_output, mathematical_quantity=self.math_object.mathematical_quantity, obj_id=-1, quantor=quantor)
 
-    def primitive_eq(self, other: Node):
+    def primitive_eq(self, other: Node, print_trace: bool = False):
         """
         Runs primitive equal check between two nodes. They are equal if type and binding quantity are the same
         """
+        if print_trace: print(f"Checking {self} == {other}")
         # Two functional application can only equal if their functions are equal and child_nodes are primitively equal
         if self.node_object.obj_id == other.node_object.obj_id == -1:
             if self.math_object == other.math_object:
                 for self_child, other_child in zip(self.child_nodes, other.child_nodes):
-                    if not self_child.primitive_eq(other_child):
+                    if not self_child.primitive_eq(other_child, print_trace=print_trace):
+                        if print_trace: print(f"False: child_nodes unequal {self_child} & {other_child}")
                         return False
+                if print_trace: print("True: All child nodes and functions are equal")
                 return True
+            if print_trace: print("False: Different functions")
             return False
-        if self.node_object.obj_id == -1 or other.node_object.obj_id == -1:
-            return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity
-        return type(self.node_object) == type(other.node_object) and self.node_object.binding_quantity == other.node_object.binding_quantity and self.node_object.obj_id == other.node_object.obj_id
+        if type(self.node_object) is not type(other.node_object):
+            if print_trace: print(f"False: Type didn't match: {type(self.node_object)} & {type(other.node_object)}")
+            return False
+        if self.node_object.obj_id != -1 and other.node_object.obj_id != -1:
+            # Special case
+            if self.node_object.binding_quantity == other.node_object.binding_quantity and (self.node_object.quantor == Quantor.FORALL or other.node_object.quantor == Quantor.FORALL) and self.node_object.mathematical_quantity == other.node_object.mathematical_quantity:
+                if print_trace: print(f"True: Node object's type and binding status equal. Since both are for all over same domain and have same mathematical binding, the elements are the same {self} == {other}")
+                return True
+            if self.node_object.obj_id != other.node_object.obj_id:
+                if print_trace: print(f"False: Object ids are not -1 but differ: {self.node_object.obj_id} & {other.node_object.obj_id}")
+                return False
+        if print_trace: print(f"True: Node object's type {'and object ids are' if self.node_object.obj_id == -1 or other.node_object.obj_id == -1 else 'is'} equal")
+        return True
 
-    def primitive_contains(self, other: Node) -> Generator[Node, Node]:
+    def primitive_contains(self, other: Node, print_trace: bool = False) -> Generator[Node, Node]:
         """
         Runs primitive recursive check on tree structure to yield possible equal nodes as well as parent nodes.
         """
-        if self.primitive_eq(other):
+        if print_trace: print(f"Checking {other} contains {self}")
+        if self.primitive_eq(other, print_trace=print_trace):
+            if print_trace: print(f"{self} == {other}")
             yield self, None
         for child_node in self.child_nodes:
-            for res in child_node.primitive_contains(other):
+            for res in child_node.primitive_contains(other, print_trace=print_trace):
                 yield res[0], self
+            if print_trace:
+                if not child_node.primitive_contains(other):
+                    print(f"{child_node} has no primitive contains of {other}")
+        if print_trace: print("Contains check done")
 
-    def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = None) -> Tuple[Dict[Node, Node], bool]:
+    def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = None, print_trace: bool = False) -> Tuple[Dict[Node, Node], bool]:
         """
         Recursively checks what nodes had to be replaced if other would be applied
         """
         if not mapping:
             mapping = {}
         if self.math_object != other.math_object:
+            if print_trace: print(f"Can't map {self} - {other} because {self.math_object} != {other.math_object}")
             return mapping, False
 
         for i, (self_node, other_node) in enumerate(zip(self.child_nodes, other.child_nodes)):
             if self_node.math_object != other_node.math_object:
                 if self_node.node_object.quantor >= other_node.node_object.quantor:
+                    if print_trace: print(f"Map {self_node} - {other_node} because of quantor hierarchy on tuple {self_node.node_object} & {other_node.node_object}")
                     mapping[self_node] = other_node
                 else:
+                    if print_trace: print(f"Can't map {self_node} - {other_node}, because self is of lower quantor hierarchy {self_node.node_object} & {other_node.node_object}")
                     return mapping, False
             else:
-                mapping, possible = self_node.get_mappings_dict_for_replacement(other_node, mapping)
+                mapping, possible = self_node.get_mappings_dict_for_replacement(other_node, mapping, print_trace)
                 if not possible:
                     return mapping, False
 
