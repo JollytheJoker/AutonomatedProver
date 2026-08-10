@@ -30,7 +30,7 @@ class Quantor(Enum):
         """
         Return true if other is FORALL
         """
-        return self == Quantor.FORALL
+        return other == Quantor.FORALL
 
 
 _ID_COUNTER: Dict[Tuple[Tuple[Object, ...], FrozenSet, Quantor], int] = {}
