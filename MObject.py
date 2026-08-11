@@ -73,7 +73,7 @@ class Object:
         return type(self), self.binding_quantity, self.mathematical_quantity, self.quantor, self.obj_id
 
     def __eq__(self, other: Object) -> bool:
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         # Only check for id's if any object was defined
         if self.quantor == Quantor.DEFINE or other.quantor == Quantor.DEFINE:
@@ -81,7 +81,7 @@ class Object:
         return self.binding_quantity == other.binding_quantity and self.mathematical_quantity == other.mathematical_quantity and self.quantor == other.quantor
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ElementrySet(Object):
     """An elementary base set with empty binding requirements."""
     binding_quantity = tuple()
@@ -99,7 +99,7 @@ class ElementrySet(Object):
         return 1
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Set(Object):
     """A set, which is contained in another set or in the cross-product of other sets"""
 
@@ -120,7 +120,7 @@ class Set(Object):
         return len(self.binding_quantity)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PowerSet(Object):
     """A powerSet is a set that contains every subset of a set"""
     nested_depth: int = 0
@@ -145,7 +145,7 @@ class PowerSet(Object):
         return 1
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class FunctionSet(Object):
     """A function set is a set that contains every possible mapping from set A to set B"""
 
@@ -166,7 +166,7 @@ class FunctionSet(Object):
         return 1
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Variable(Object):
     """A base variable that has exactly one value in its binding quantity"""
 
@@ -184,7 +184,7 @@ class Variable(Object):
         return f'{self.quantor} Variable_{self.obj_id} which lies in {str(self.binding_quantity[0])}'
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Function(Object):
     """A base function that has exactly two values in its binding quantity an in- and output set"""
 

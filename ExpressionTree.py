@@ -201,3 +201,16 @@ class Node:
         copy_node.child_nodes = new_children
 
         return copy_node
+
+    def id_less_equal(self, other: Node):
+        """ Checks if other node is exaclty the same as self, but without checking for ids """
+        if self.math_object != other.math_object:
+            return False
+        if len(self.child_nodes) != len(other.child_nodes):
+            return False
+        for self_child, other_child in zip(self.child_nodes, other.child_nodes):
+            if not self_child.id_less_equal(other_child):
+                return False
+        return True
+
+
