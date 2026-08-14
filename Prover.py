@@ -24,6 +24,7 @@ class Prove:
     def __repr__(self):
         return f"{str(self.current_state)}\n Transformations: \n {"; \n".join(str(transformation) + ("^-1" if is_inverse else "") for transformation, is_inverse in self.transformations)}, \n State log: {"; \n".join(str(state) for state in self.state_log)}"
 
+
 class Prover:
     def __init__(self):
         self.statements: List[Statement] = []

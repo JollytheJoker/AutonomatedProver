@@ -59,7 +59,7 @@ class Object:
     mathematical_quantity: FrozenSet = field(default_factory=frozenset)
     quantor: Quantor = Quantor.DEFINE
     obj_id: int = field(default=0)
-    assosiation: str = ''
+    association: str = ''
 
     def __post_init__(self):
         if self.obj_id == 0:
@@ -91,8 +91,8 @@ class ElementrySet(Object):
         return f'(U, (), {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return f'{self.assosiation}'
+        if self.association:
+            return f'{self.association}'
         return f'Urmenge_{self.obj_id}'
 
     def __len__(self):
@@ -112,8 +112,8 @@ class Set(Object):
         return f'(M, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return f'{self.assosiation}'
+        if self.association:
+            return f'{self.association}'
         return f'{self.quantor} Set_{self.obj_id} which is subset of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
 
     def __len__(self):
@@ -137,8 +137,8 @@ class PowerSet(Object):
         return f'(P, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return self.assosiation
+        if self.association:
+            return self.association
         return f'{self.quantor} PowerSet_{self.obj_id} of {str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}'
 
     def __len__(self):
@@ -158,8 +158,8 @@ class FunctionSet(Object):
         return f'(FS, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return self.assosiation
+        if self.association:
+            return self.association
         return f'{self.quantor} FunctionSet_{self.obj_id} of functions from {str(self.binding_quantity[0])} to {str(self.binding_quantity[1])}'
 
     def __len__(self):
@@ -179,8 +179,8 @@ class Variable(Object):
         return f'(V, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return f'{self.assosiation}'
+        if self.association:
+            return f'{self.association}'
         return f'{self.quantor} Variable_{self.obj_id} which lies in {str(self.binding_quantity[0])}'
 
 
@@ -197,6 +197,6 @@ class Function(Object):
         return f'(F, {self.binding_quantity}, {(repr(quantity) for quantity in self.mathematical_quantity)}, {self.quantor}, {self.obj_id})'
 
     def __str__(self):
-        if self.assosiation:
-            return f'{self.assosiation}'
+        if self.association:
+            return f'{self.association}'
         return f'{self.quantor} Function_{self.obj_id}: {str(self.binding_quantity[0])} -> {str(self.binding_quantity[1])}'

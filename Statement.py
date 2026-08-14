@@ -32,8 +32,18 @@ class Statement:
                 if print_trace: print("Subtree is final-tree")
                 yield final_sub_expression
             else:
-                parent_copy = parent_res.__copy__()
-                parent_copy.child_nodes = [final_sub_expression if child == res else child for child in parent_res.child_nodes]
+                new_child_nodes = []
+                for child_chain in parent_res.child_nodes:
+                    new_chain = []
+                    for child_node, weight in child_chain:
+                        if child_node == res:
+                            new_chain.append((final_sub_expression, weight))
+                        else:
+                            new_chain.append((child_node, weight))
+                    new_child_nodes.append(new_chain)
+
+                parent_copy = Node(math_object=parent_res.math_object, child_nodes=new_child_nodes)
+
                 if print_trace: print(f"Reordered subtree into main tree to {parent_copy}")
                 yield parent_copy
         else:
@@ -54,8 +64,18 @@ class Statement:
                 if print_trace: print("Subtree is final-tree")
                 yield final_sub_expression
             else:
-                parent_copy = parent_res.__copy__()
-                parent_copy.child_nodes = [final_sub_expression if child == res else child for child in parent_res.child_nodes]
+                new_child_nodes = []
+                for child_chain in parent_res.child_nodes:
+                    new_chain = []
+                    for child_node, weight in child_chain:
+                        if child_node == res:
+                            new_chain.append((final_sub_expression, weight))
+                        else:
+                            new_chain.append((child_node, weight))
+                    new_child_nodes.append(new_chain)
+
+                parent_copy = Node(math_object=parent_res.math_object, child_nodes=new_child_nodes)
+
                 if print_trace: print(f"Reordered subtree into main tree to {parent_copy}")
                 yield parent_copy
         else:

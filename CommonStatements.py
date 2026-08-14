@@ -3,11 +3,7 @@ from typing import Union
 from ExpressionTree import Node
 from MObject import Function, ElementrySet, Set, PowerSet, FunctionSet, Quantor, Variable
 from Statement import Relation, Statement
-
-# GENERAL GLOBAL DEFINITIONS
-definitions = {
-    "reels": ElementrySet(quantor=Quantor.DEFINE, assosiation='R')
-}
+from Definitions import definitions
 
 
 def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
@@ -17,19 +13,19 @@ def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
     while current.child_nodes:
         if len(current.child_nodes) > 1:
             raise ValueError("Can at most have one parameter for continuity")
-        current = current.child_nodes[0]
-    current.child_nodes = [new_child]
+        current = current.child_nodes[0][-1][0]
+    current.child_nodes = [[(new_child, 1)]]
     return copied_root
 
 
 def ball_func(on_set: Union[ElementrySet, Set, PowerSet, FunctionSet]):
     """ A ball function for a given set """
     # Check if this ball function was added to definitions
-    if f'B_{"{"}{str(on_set.assosiation)}{"}"}' in definitions.keys():
-        return definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}']
+    if f'B_{"{"}{str(on_set.association)}{"}"}' in definitions.keys():
+        return definitions[f'B_{"{"}{str(on_set.association)}{"}"}']
     else:
-        definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}'] = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(on_set, on_set)), definitions["reels"], on_set)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(on_set, ))), assosiation=f'B_{"{"}{str(on_set.assosiation)}{"}"}')
-    return definitions[f'B_{"{"}{str(on_set.assosiation)}{"}"}']
+        definitions[f'B_{"{"}{str(on_set.association)}{"}"}'] = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(on_set, on_set)), definitions["reels"], on_set)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(on_set, ))), association=f'B_{"{"}{str(on_set.association)}{"}"}')
+    return definitions[f'B_{"{"}{str(on_set.association)}{"}"}']
 
 
 def continuous(func: Function | Node, metr_input: Function, metr_output: Function):
@@ -46,10 +42,9 @@ def continuous(func: Function | Node, metr_input: Function, metr_output: Functio
 
     # We want to put the point as a parameter for the most inner function
 
-    ball_node = Node(B_in, child_nodes=[Node(metr_input), Node(delta), Node(point)])
+    ball_node = Node(B_in, child_nodes=[[(Node(metr_input), 1)], [(Node(delta), 1)], [(Node(point), 1)]])
     continuity_left = _attach_at_leaf(func, ball_node)
 
     inner_application = _attach_at_leaf(func, Node(point))
-    continuity_right = Node(B_out, child_nodes=[Node(metr_output), Node(epsilon), inner_application])
-
+    continuity_right = Node(B_out, child_nodes=[[(Node(metr_output), 1)], [(Node(epsilon), 1)], [(inner_application, 1)]])
     return Statement(continuity_left, continuity_right, Relation.SUBSET)
