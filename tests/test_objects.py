@@ -1,57 +1,39 @@
 import pytest
-from MObject import ElementrySet, Set, PowerSet, FunctionSet, Variable, Function, Quantor
+from MObject import Set, Function, Quantor
 
 
 def test_object_creation():
     """Tests if all objects are created correctly"""
-    # Elementary Sets
-    u1 = ElementrySet(association="X")
-    assert u1.association == "X"
-    assert u1.binding_quantity == ()
-    assert str(u1) == "X"
-    u2 = ElementrySet(association="Y")
-
     # Sets
-    s1 = Set(association="A", binding_quantity=(u1,), quantor=Quantor.DEFINE)
-    assert s1.binding_quantity == (u1,)
-    with pytest.raises(Exception):
-        Set(binding_quantity=())
-
-    # Power sets
-    p1 = PowerSet(association="P(x)", binding_quantity=(u1, ), quantor=Quantor.DEFINE)
-    assert p1.nested_depth == 1
-    p2 = PowerSet(binding_quantity=(p1, ), quantor=Quantor.DEFINE)
-    assert p2.nested_depth == 2
-
-    # Function sets
-    f1 = FunctionSet(binding_quantity=(u1, u2), quantor=Quantor.DEFINE)
-    with pytest.raises(Exception):
-        FunctionSet(binding_quantity=(u1, ), quantor=Quantor.DEFINE)
-    with pytest.raises(Exception):
-        FunctionSet(binding_quantity=(), quantor=Quantor.DEFINE)
+    x = Set(association="X", binding_quantity=tuple())
+    a = Set(association="A", binding_quantity=(x,))
+    assert a.binding_quantity == (x,)
 
     # Variables
-    v1 = Variable(association="x", binding_quantity=(u1,), quantor=Quantor.DEFINE)
-    assert v1.binding_quantity == (u1,)
+    v1 = Set(association="x", binding_quantity=(x,), nested_depth=0)
+    assert v1.binding_quantity == (x,)
     with pytest.raises(Exception):
-        Variable(binding_quantity=())
+        Set(binding_quantity=(), nested_depth=0)
 
+    # Power sets
+    p1 = Set(binding_quantity=(x, ), nested_depth=1)
+    assert p1.nested_depth == 1
     with pytest.raises(Exception):
-        Variable(binding_quantity=(u1, u1))
+        Set(binding_quantity=tuple(), nested_depth=2, quantor=Quantor.DEFINE)
 
     # Functions
-    f1 = Function(association="f", binding_quantity=(u1, u2), quantor=Quantor.DEFINE)
-    assert f1.binding_quantity == (u1, u2)
+    f1 = Function(association="f", binding_quantity=(x, x))
+    assert f1.binding_quantity == (x, x)
     with pytest.raises(Exception):
         Function(binding_quantity=())
 
     with pytest.raises(Exception):
-        Function(binding_quantity=(u1,))
+        Function(binding_quantity=(x,))
 
 
 def test_id_generation_determinism():
     """Tests if objects with same signature have different ids"""
-    u1 = ElementrySet()
-    u2 = ElementrySet()
+    s1 = Set(binding_quantity=())
+    s2 = Set(binding_quantity=())
 
-    assert u2.obj_id == u1.obj_id + 1
+    assert s1.obj_id != s2.obj_id
