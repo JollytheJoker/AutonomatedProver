@@ -1,10 +1,10 @@
-from MObject import ElementrySet, Set, Function, Quantor
+from MObject import Set, Function, Quantor
 
 
 # GENERAL GLOBAL DEFINITIONS
 definitions = {
-    "integers": ElementrySet(quantor=Quantor.DEFINE, association='N'),
-    "reels": ElementrySet(quantor=Quantor.DEFINE, association='R')
+    "integers": Set(association='N'),
+    "reels": Set(association='R')
 }
 
 # Helper
@@ -17,3 +17,5 @@ operations = {
     "sub": Function(quantor=Quantor.DEFINE, binding_quantity=(_helper["NxN"], definitions["integers"]), association='-'),
     "mul": Function(quantor=Quantor.DEFINE, binding_quantity=(_helper["NxN"], definitions["integers"]), association='*')
 }
+
+# TODO: Implement Successor methode and axioms for addition

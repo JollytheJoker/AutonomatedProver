@@ -2,10 +2,9 @@ from __future__ import annotations
 import math
 from collections import deque
 from functools import cached_property
-import copy
 from dataclasses import dataclass, field, replace
-from MObject import Object, Set, ElementrySet, PowerSet, Function, Variable, Quantor, FunctionSet
-from typing import Tuple, Dict, List, Generator, Union, NamedTuple
+from MObject import Object, Set, Function, Quantor
+from typing import Tuple, Dict, List, Generator, Union, NamedTuple, Callable
 from Definitions import definitions, operations
 
 
@@ -51,7 +50,7 @@ class Edge:
         The cylce length is the exact number of applications done to return to the original node
         """
         visited = set()
-        parent_hash = hash(self.parent_node)
+        parent_hash = id(self.parent_node)
         nodes_queue = deque([(self.to_node, 0)])
         while nodes_queue:
             node, cycle_length = nodes_queue.popleft()
@@ -59,7 +58,7 @@ class Edge:
                 sub_cycle_length = 1
                 for edge in argument_slot.edge_sequence:
                     child_node = edge.to_node
-                    hash_val = hash(child_node)
+                    hash_val = id(child_node)
                     new_cycle_length = _add_values(cycle_length, sub_cycle_length)
                     if hash_val == parent_hash:
                         return True, new_cycle_length
@@ -93,19 +92,41 @@ class ArgumentSlot:
     @cached_property
     def output_object(self) -> Object:
         """ The reccursive output of the last (or in sequence first) edge as an object """
-        return self.edge_sequence[0].to_node.node_object
+        obj = self.edge_sequence[0].to_node.node_object
+        if isinstance(obj, Set):
+            return replace(obj, nested_depth=self.nested_depth)
+        return obj
 
     @cached_property
     def number_of_applications(self) -> Union[int, float, Node]:
         """ Returns the sum of all edges' cycle lengths """
         return sum(edge.cycle_length for edge in self.edge_sequence)
 
+    @cached_property
+    def nested_depth(self) -> int:
+        """ Returns the itteratively calculated nested depth of the argument chain """
+        child_node = self.edge_sequence[-1].to_node.node_object
+        if isinstance(child_node, Set):
+            nested_depth = child_node.nested_depth
+            for edge in self.edge_sequence[::-1][:-1]:
+                difference = nested_depth - edge.to_node.math_object.binding_quantity[0].nested_depth
+                if difference < 0:
+                    raise Exception(f"Nested depth doesn't suffice for functions input {edge.to_node.math_object}")
+                nested_depth = edge.to_node.math_object.binding_quantity[1].nested_depth + difference
+            return nested_depth
+        return 1
+
+    @property
+    def quantor(self) -> Quantor:
+        return Quantor.EXISTS if any(edge.to_node.node_object.quantor == Quantor.EXISTS or edge.to_node.node_object.quantor == Quantor.DEFINE for edge in self.edge_sequence) else Quantor.FORALL
+
     @classmethod
     def create(cls, edge_sequence: Union[List[Edge], Tuple[Edge, ...]], parent_node: Node, desired_output: Object) -> ArgumentSlot:
         return cls(cls._simplify(edge_sequence, parent_node), parent_node, desired_output)
 
-    def __eq__(self, other: ArgumentSlot):
-        """ Strict equality check of every edge in argument sequence """
+    def compare(self, other: ArgumentSlot, comparison_function: Callable) -> bool:
+        """ General comparison function for given comparator (such as == or id_less_equal) """
+        # Primitve filtering
         if self is other:
             return True
         if self.number_of_applications != other.number_of_applications:
@@ -121,12 +142,25 @@ class ArgumentSlot:
         state_self = CycleState(edge_sequence=list(self.edge_sequence))
         state_other = CycleState(edge_sequence=list(other.edge_sequence))
 
-        return _reduce_cycles_over_accounting_for_residu(state_self, state_other)
+        return _boolean_cmr(state_self, state_other, comparison_function)
+
+    def __eq__(self, other: ArgumentSlot):
+        """ Strict equality check of every edge in argument sequence """
+        return self.compare(other, eq)
+
+    def id_less_equal(self, other: ArgumentSlot):
+        """ Strict equality check of every edge in argument sequence but without regarding objects id """
+        return self.compare(other, id_less_eq)
 
     def check_validity(self) -> bool:
         """ Checks if edges are valid and if all sequence's edge's nodes output desired object """
         cyclical_flag = True
-        for edge in self.edge_sequence:
+        number_of_edges = len(self.edge_sequence)
+        for i, edge in enumerate(self.edge_sequence):
+            if i < number_of_edges - 1:
+                if not isinstance(edge.to_node.math_object, Function):
+                    return False
+
             # If the last edge wasn't cyclical, we can't have new edges going out from this node as it is never reached again
             if not cyclical_flag:
                 return False
@@ -166,7 +200,6 @@ class CycleState(NamedTuple):
     idx: int = 0
     shift: int = 0
 
-
 @dataclass(frozen=True, eq=False)
 class Node:
     """
@@ -174,6 +207,25 @@ class Node:
     """
     math_object: Object
     argument_slots: Tuple[ArgumentSlot, ...] = field(default_factory=tuple)
+
+    @cached_property
+    def node_object(self):
+        """ Recursively build up the node tuple using the function at the node """
+        if not self.argument_slots:
+            return self.math_object
+
+        quantor = Quantor.EXISTS if any(
+            argument_slots.quantor == Quantor.EXISTS or argument_slots.quantor == Quantor.DEFINE for argument_slots in
+            self.argument_slots) else Quantor.FORALL
+        standart_output = _get_object_instance_of_functions_standart_output(self.math_object)
+
+        # Get the output type by checking if any input is set instead of variable if variable was given. E.g., f(X) will be a set, but the output of x was normally defined as output variables.
+        difference = _get_nested_depth_difference(self, self.math_object.binding_quantity[0])
+
+        standart_output.__setattr__("obj_id", None)
+        if isinstance(standart_output, Set):
+            return replace(standart_output, nested_depth=standart_output.nested_depth + difference, quantor=quantor)
+        return replace(standart_output, quantor=quantor)
 
     def check_validity(self) -> bool:
         """ If node has argument slots checks if math_object is of type function """
@@ -223,10 +275,11 @@ class Node:
             return res[:-2] + ')'
         return f'{self.math_object}'
 
-    def __eq__(self, other: Node):
-        """
-        Strict equality check in every single attribute
-        """
+    def __hash__(self):
+        return hash(tuple([hash(self.math_object)] + [hash(arg_slot) for arg_slot in self.argument_slots]))
+
+    def compare(self, other: Node, comparison_function: Callable) -> bool:
+        """ General comparison function for given comparator (such as == or id_less_equal) """
         if self is other:
             return True
         if self.math_object != other.math_object:
@@ -234,169 +287,143 @@ class Node:
         if len(self.argument_slots) != len(other.argument_slots):
             return False
         for self_slot, other_slot in zip(self.argument_slots, other.argument_slots):
-            if self_slot == other_slot:
+            if not comparison_function(self_slot, other_slot):
                 return False
         return True
 
-    def __hash__(self):
-        return hash(tuple([self.math_object.toTuple()] + [hash(slot) for slot in self.argument_slots]))
+    def __eq__(self, other: Node) -> bool:
+        """ Strict equality check in every single attribute """
+        return self.compare(other, eq)
 
-    @cached_property
-    def node_object(self):
-        """
-        Recursively build up the node tuple using the function at the node
-        """
-        if not self.argument_slots:
-            return self.math_object
-
-        quantor = Quantor.EXISTS if any(child_object.math_object.quantor == Quantor.EXISTS or child_object.math_object.quantor == Quantor.DEFINE for child_object in self.final_child_nodes) else Quantor.FORALL
-        # Get the output type by checking if any input is set instead of variable if variable was given. E.g., f(X) will be a set, but the output of x was normally defined as output variables.
-        math_obj_out = self.math_object.binding_quantity[1]
-        normal_output = _get_normal_output_of_function(math_obj_out)
-
-        # Test for any change in input
-        upper_output_type = _get_upper_output_type_value(self, self.math_object.binding_quantity[0])
-        if upper_output_type > 0:
-            normal_output = math_obj_out
-        for _ in range(upper_output_type - 1):
-            normal_output = PowerSet(binding_quantity=(normal_output, ), quantor=quantor)
-
-        return replace(normal_output, mathematical_quantity=self.math_object.mathematical_quantity, obj_id=-1, quantor=quantor)
-
-    @cached_property
-    def final_child_nodes(self):
-        result = []
-        for child_chain in self.child_nodes:
-            # Most outer application is first in child_chain
-            application = child_chain[0][0].math_object
-            if len(child_chain) > 1:
-                if not isinstance(application, Function):
-                    raise ValueError("Can't multicall on a non-function")
-            else:
-                if child_chain[0][1] != 1:
-                    raise ValueError("Non-function node can only be pointed to exactly ones")
-                result.append(copy.deepcopy(child_chain[0][0]))
-                continue
-            normal_output = _get_normal_output_of_function(application.binding_quantity[1])
-            quantor = Quantor.EXISTS if any(node.math_object.quantor == Quantor.EXISTS or node.math_object.quantor == Quantor.DEFINE for node, _ in child_chain) else Quantor.FORALL
-            upper_output_type = _get_upper_output_type_value(child_chain[-1][0], child_chain[-1][0].math_object.binding_quantity[0])
-            if upper_output_type > 0:
-                normal_output = application.binding_quantity[1]
-            for _ in range(upper_output_type - 1):
-                normal_output = PowerSet(binding_quantity=(normal_output,), quantor=quantor)
-            normal_output = replace(normal_output, obj_id=-1, quantor=quantor)
-            final_node = Node(normal_output, child_nodes=child_chain[-1][0].child_nodes)
-            result.append(final_node)
-        return result
+    def id_less_eq(self, other: Node) -> bool:
+        """ Checks if the other node is exactly the same as self, but without checking for ids """
+        return self.compare(other, id_less_eq)
 
     def primitive_eq(self, other: Node, print_trace: bool = False):
-        """
-        Runs primitive equal check between two nodes. They are equal if type and binding quantity are the same
-        """
+        """ Runs primitive equal check between two nodes. They are equal if type and binding quantity are the same """
         if print_trace: print(f"Checking {self} == {other}")
+        if self is other:
+            return True
+
         self_obj = self.node_object
         other_obj = other.node_object
-        # Two functional application can only equal if their functions are equal and child_nodes are primitively equal
-        if self_obj.obj_id == other_obj.obj_id == -1:
-            if self.math_object == other.math_object:
-                for self_child, other_child in zip(self.final_child_nodes, other.final_child_nodes):
-                    if not self_child.primitive_eq(other_child, print_trace=print_trace):
-                        if print_trace: print(f"False: child_nodes unequal {self_child} & {other_child}")
-                        return False
-                if print_trace: print("True: All child nodes and functions are equal")
-                return True
-            if print_trace: print("False: Different functions")
-            return False
         if type(self_obj) is not type(other_obj):
             if print_trace: print(f"False: Type didn't match: {type(self_obj)} & {type(other_obj)}")
             return False
+
+        # Two applications (thus obj_id = -1) can only equal if their functions are equal and child_nodes are primitively equal
+        if self_obj.obj_id == other_obj.obj_id == -1:
+            if self.math_object == other.math_object:
+                if len(self.argument_slots) != len(other.argument_slots):
+                    return False
+                for self_argument_slot, other_argument_slot in zip(self.argument_slots, other.argument_slots):
+                    self_argument_slot_output_object = self_argument_slot.output_object
+                    other_argument_slot_output_object = other_argument_slot.output_object
+
+                    if type(self_argument_slot_output_object) is not type(other_argument_slot_output_object):
+                        if print_trace: print(f"False: Argumentchains output types unequal {type(self_argument_slot_output_object)} & {type(other_argument_slot_output_object)}")
+                        return False
+                    if self_argument_slot_output_object.binding_quantity != other_argument_slot_output_object.binding_quantity:
+                        if print_trace: print(f"False: Argumentchains' binding_quantity unequal {self_argument_slot_output_object} & {other_argument_slot_output_object}")
+                        return False
+                    if isinstance(self_argument_slot_output_object, Set) and isinstance(other_argument_slot_output_object, Set):
+                        if self_argument_slot_output_object.nested_depth != other_argument_slot_output_object.nested_depth:
+                            if print_trace: print(f"False: Nested depth of argumentchains is unequal {self_argument_slot_output_object} & {other_argument_slot_output_object}")
+                            return False
+
+                if print_trace: print("True: All argument_chains and functions are equal")
+                return True
+            if print_trace: print("False: Different functions")
+            return False
+
+        # Special case: Obj_ids
         if self_obj.obj_id != -1 and other_obj.obj_id != -1:
-            # Special case
-            if self_obj.binding_quantity == other_obj.binding_quantity and (self_obj.quantor == Quantor.FORALL or other_obj.quantor == Quantor.FORALL) and self_obj.mathematical_quantity == other_obj.mathematical_quantity:
-                if print_trace: print(f"True: Node object's type and binding status equal. Since both are for all over same domain and have same mathematical binding, the elements are the same {self} == {other}")
+            if self_obj.binding_quantity == other_obj.binding_quantity and (self_obj.quantor == Quantor.FORALL or other_obj.quantor == Quantor.FORALL):
+                if print_trace: print(f"True: Node object's type and binding status equal. Since both are for all over same domain, the objects are the same {self} == {other}")
                 return True
             if self_obj.obj_id != other_obj.obj_id:
                 if print_trace: print(f"False: Object ids are not -1 but differ: {self_obj.obj_id} & {other_obj.obj_id}")
                 return False
+
+        # Direct primitve comparison
+        if self_obj.binding_quantity != other_obj.binding_quantity:
+            return False
+        if isinstance(self_obj, Set) and isinstance(other_obj, Set):
+            if self_obj.nested_depth != other_obj.nested_depth:
+                return False
+
         if print_trace: print(f"True: Node object's type {'and object ids are' if self_obj.obj_id == -1 or other_obj.obj_id == -1 else 'is'} equal")
         return True
 
-    def primitive_contains(self, other: Node, print_trace: bool = False) -> Generator[Node, Node]:
+    def primitive_contains(self, other: Node, visited: set = None, print_trace: bool = False) -> Generator[Tuple[Node, Union[Node, None]]]:
         """
         Runs primitive recursive check on tree structure to yield possible equal nodes as well as parent nodes.
+        Reccursively checks for all from root_node reachable nodes if they are primitvely_equal to the other node.
         """
         if print_trace: print(f"Checking {other} contains {self}")
-        if self.primitive_eq(other, print_trace=print_trace):
+        if not visited:
+            visited = set()
+        if id(self) in visited:
+            return
+
+        visited.add(id(self))
+        if self.primitive_eq(other, print_trace):
             if print_trace: print(f"{self} == {other}")
             yield self, None
-        for child_chain in self.child_nodes:
-            if print_trace: print(f"    Checking {child_chain[0][0]}")
-            # Generate all possible child_nodes
-            recursive_node = child_chain[-1][0]
-            #breakpoint()
-            for res in recursive_node.primitive_contains(other, print_trace=print_trace):
-                if print_trace: print(f"{res[0]}")
-                yield res[0], self
-            if print_trace and recursive_node.primitive_contains(other) is None:
-                print(f"{recursive_node} has no primitive contains of {other}")
 
-            for i in range(2, len(child_chain)):
-                # Run with function
-                for res in recursive_node.primitive_contains(other, print_trace=print_trace):
-                    if print_trace: print(f"{res}")
-                    yield res[0], self
-                if print_trace and recursive_node.primitive_contains(other) is None:
-                    print(f"{recursive_node} has no primitive contains of {other}")
+        # Generate all possible sub_graphs going on from this
+        for argument_slot in self.argument_slots:
+            for edge in argument_slot.edge_sequence:
+                new_node = edge.to_node
 
-                next_element = child_chain[-i]
-                temp_node_w1 = Node(math_object=next_element[0].math_object, child_nodes=[[(recursive_node, 1)]])
-
-                for res in temp_node_w1.primitive_contains(other, print_trace=print_trace):
-                    yield res[0], self
-                if print_trace and not any(True for _ in temp_node_w1.primitive_contains(other)):
-                    print(f"{temp_node_w1} has no primitive contains of {other}")
-
-                # 3. Run with full weight applied function
-                recursive_node = Node(math_object=next_element[0].math_object,
-                                      child_nodes=[[next_element, (recursive_node, 1)]])
-
-                for res in recursive_node.primitive_contains(other, print_trace=print_trace):
-                    yield res[0], self
-                if print_trace and not any(True for _ in recursive_node.primitive_contains(other)):
-                    print(f"{recursive_node} has no primitive contains of {other}")
+                for res, parent in new_node.primitive_contains(other, visited, print_trace):
+                    yield res, parent
 
         if print_trace: print("Contains check done")
 
+
     def get_mappings_dict_for_replacement(self, other: Node, mapping: Dict[Node, Node] = None, print_trace: bool = False) -> Tuple[Dict[Node, Node], bool]:
-        """
-        Recursively checks what nodes had to be replaced if other would be applied
-        """
+        """ Recursively checks what nodes had to be replaced to make self, the other node """
         if not mapping:
             mapping = {}
-        if self.math_object != other.math_object:
+        self_math_object = self.math_object
+        other_math_object = self.math_object
+
+        # LEAVE-NODES
+        if not self.argument_slots:
+            # Self is a leave-node, hence other must also be leave-node with the same math_object for possible mapping
+            if other.argument_slots:
+                return mapping, False
+            if self_math_object == other_math_object and other_math_object.quantor == Quantor.FORALL:
+                mapping[self] = other
+
+        if not other.argument_slots:
+            # Other is leave-node. It's math_object must be the same as self's node object
+            if self.node_object == other_math_object and other_math_object.quantor == Quantor.FORALL:
+                mapping[self] = other
+
+        # SIMPLE EQUALITY CHECKS
+        if self_math_object != other_math_object:
             if print_trace: print(f"Can't map {self} - {other} because {self.math_object} != {other.math_object}")
             return mapping, False
+        if len(self.argument_slots) != len(other.argument_slots):
+            if print_trace: print(
+                f"Can't map, because child chains don't match: {len(self.argument_slots)} & {len(other.argument_slots)}")
+            return mapping, False
 
-        for self_child_chain, other_child_chain in zip(self.child_nodes, other.child_nodes):
-            if len(self_child_chain) != len(other_child_chain):
-                if print_trace: print(f"Can't map, because child chains don't match: {len(self_child_chain)} & {len(other_child_chain)}")
-                return mapping, False
-            for (self_node, self_weight), (other_node, other_weight) in zip(self_child_chain, other_child_chain):
-                if self_weight != other_weight:
-                    if print_trace: print(f"Can't map, because chain weights missmatch: {self_node}, {self_weight} & {other_node}, {other_weight}")
+        # CMR until either equal or leave-node
+        for self_argument_slot, other_argument_slot in zip(self.argument_slots, other.argument_slots):
+            state_self = CycleState(edge_sequence=list(self_argument_slot.edge_sequence))
+            state_other = CycleState(edge_sequence=list(other_argument_slot.edge_sequence))
+
+            self_reduced, other_reduced, valid_cmr = cmr(state_self, state_other, eq)
+            if valid_cmr:
+                mapping, valid = self_reduced.get_mappings_dict_for_replacement(other_reduced, mapping, print_trace)
+                if not valid:
                     return mapping, False
-
-                if self_node.math_object != other_node.math_object:
-                    if self_node.node_object.quantor >= other_node.node_object.quantor:
-                        if print_trace: print(f"Map {self_node} - {other_node} because of quantor hierarchy on tuple {self_node.node_object} & {other_node.node_object}")
-                        mapping[self_node] = other_node
-                    else:
-                        if print_trace: print(f"Can't map {self_node} - {other_node}, because self is of lower quantor hierarchy {self_node.node_object} & {other_node.node_object}")
-                        return mapping, False
-                else:
-                    mapping, possible = self_node.get_mappings_dict_for_replacement(other_node, mapping, print_trace)
-                    if not possible:
-                        return mapping, False
+            else:
+                if self_reduced and other_reduced:
+                    mapping[self_reduced] = other_reduced
 
         return mapping, True
 
@@ -410,108 +437,68 @@ class Node:
         if self in memo:
             return memo[self]
 
-        new_child_nodes = []
-        for child_chain in self.child_nodes:
-            new_chain = []
-            for child, weight in child_chain:
-                new_child = child.remap_objects(mapping, memo)
-                new_chain.append((new_child, weight))
-            new_child_nodes.append(new_chain)
+        new_argument_slots = []
+        for argument_slot in self.argument_slots:
+            new_edge_sequence = []
+            for edge, weight in argument_slot.edge_sequence:
+                new_node = edge.to_node.remap_objects(mapping, memo)
+                new_edge_sequence.append(Edge(new_node, weight, argument_slot.parent_node))
+            new_argument_slots.append(replace(argument_slot, edge_sequence=tuple(new_edge_sequence)))
 
-        new_node = Node(math_object=self.math_object)
-        new_node.child_nodes = new_child_nodes
-
-        new_node._simplify_child_nodes()
+        new_node = Node(math_object=self.math_object, argument_slots=tuple(new_argument_slots))
 
         memo[self] = new_node
         return new_node
 
-    def id_less_equal(self, other: Node):
-        """ Checks if other node is exactly the same as self, but without checking for ids """
-        if self.math_object != other.math_object:
-            return False
-        if len(self.child_nodes) != len(other.child_nodes):
-            return False
-        for self_child_chain, other_child_chain in zip(self.child_nodes, other.child_nodes):
-            if len(self_child_chain) != len(other_child_chain):
-                return False
-            for (self_child, self_weight), (other_child, other_weight) in zip(self_child_chain, other_child_chain):
-                if self_weight != other_weight:
-                    return False
-                if not self_child.id_less_equal(other_child):
-                    return False
-        return True
 
+# UNION OF DIFFERENT OBJECT FUNCTIONS
+def eq(obj, other):
+    if isinstance(obj, Edge) or isinstance(obj, ArgumentSlot) or isinstance(obj, Node) or isinstance(obj, Object):
+        return obj == other
+    raise Exception(f"Can not compare {obj} and {other}, '=' isn't defined for {type(obj)}")
 
-def _get_normal_output_of_function(obj: Object) -> Object:
-    """ Returns an instance of a functions normal output """
-    if isinstance(obj, Variable):
-        raise Exception("Can't map onto one variable")
-    elif isinstance(obj, ElementrySet) or isinstance(obj, Set):
-        return Variable(binding_quantity=(obj, ), quantor=Quantor.FORALL)
-    elif isinstance(obj, PowerSet):
-        max_nested_depth = max(s.nested_depth if isinstance(s, PowerSet) else 0 for s in obj.binding_quantity)
-        return replace(obj, nested_depth=max_nested_depth - 1) if max_nested_depth > 0 else Set(binding_quantity=obj.binding_quantity, quantor=Quantor.FORALL)
-    elif isinstance(obj, FunctionSet):
-        return Function(binding_quantity=obj.binding_quantity, quantor=Quantor.FORALL)
-    else:
-        raise Exception(f"Unknown type {type(obj)}")
+def id_less_eq(obj, other):
+    if isinstance(obj, ArgumentSlot) or isinstance(obj, Node):
+        return obj.id_less_equal(other)
+    raise Exception(f"Can not compare {obj} and {other}, id_less_equal is not defined for {type(obj)}")
 
+# HELPER FUNCTIONS FOR NODE OBJECT CREATION
+def _get_object_instance_of_functions_standart_output(obj: Object) -> Object:
+    """ Returns an instance of an element in the functions standart output """
+    if isinstance(obj, Function):
+        image_set = obj.binding_quantity[1]
+        if isinstance(image_set, Set):
+            if image_set.nested_depth == 0:
+                raise Exception("Can't map onto one variable")
+            return replace(image_set, nested_depth=image_set.nested_depth - 1)
+        else:
+            raise Exception(f"Unmappable type {type(image_set)}")
+    raise Exception(f"Can only give instance for function-type arguments")
 
-def _get_upper_output_type_value(node: Node, expected: Object) -> int:
-    """ Checks if any input's depth exceeds expected and returns the difference; e.g. set is given instead of variable """
-    upper_output_type = 0
-    if isinstance(expected, Variable):
-        raise Exception("Can't map from one variable")
-    if isinstance(expected, ElementrySet):
-        if len(node.child_nodes) != 1:
-            raise Exception("Must have exactly one child node if elementry set is used")
-        for child_chain in node.child_nodes:
-            for child_node, _ in child_chain:
-                if isinstance(child_node.math_object, PowerSet):
-                    upper_output_type = max(upper_output_type, child_node.math_object.nested_depth + 1)
-                if isinstance(child_node.math_object, Set) or isinstance(child_node.math_object, ElementrySet):
-                    upper_output_type = max(upper_output_type, 1)
+def _get_nested_depth_difference(node: Node, expected: Object) -> int:
+    """ Given one expected object calculates by how much expected objects nested_depht must be changed if any node's input slots leaf values is of higher nested_depth """
+    depth_difference = 0
     if isinstance(expected, Set):
-        for i, child_chain in enumerate(node.child_nodes):
-            binding_quantity = expected.binding_quantity[i]
-            for child_node, _ in child_chain:
-                child_node_obj = child_node.math_object
-                if type(child_node_obj) is not type(binding_quantity):
-                    if isinstance(child_node_obj, Set) and isinstance(binding_quantity, Variable):
-                        upper_output_type = max(upper_output_type, 1)
-                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, Variable):
-                        upper_output_type = max(upper_output_type, 1 + child_node_obj.nested_depth)
-                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, Set):
-                        upper_output_type = max(upper_output_type, child_node_obj.nested_depth)
-                    elif isinstance(child_node_obj, PowerSet) and isinstance(binding_quantity, PowerSet):
-                        if child_node_obj.nested_depth < binding_quantity.nested_depth:
-                            raise Exception("Input nested depth must be equal or exceed defined nested depth")
-                        upper_output_type = max(upper_output_type, child_node_obj.nested_depth - binding_quantity.nested_depth)
-    if isinstance(expected, PowerSet):
-        if len(node.child_nodes) != 1:
-            raise Exception("Must have exactly one child node if powerset is used")
-        for child_chain in node.child_nodes:
-            for child_node, _ in child_chain:
-                if not isinstance(child_node.math_object, PowerSet):
-                    raise Exception("Input must be of higher or same nested depth")
-                if child_node.math_object.nested_depth < expected.nested_depth:
-                    raise Exception("Input must be of higher or same nested depth")
-                upper_output_type = max(child_node.math_object.nested_depth - expected.nested_depth, upper_output_type)
-    return upper_output_type
+        if expected.nested_depth == 0:
+            raise Exception("Can't map from one variable")
+        if len(node.argument_slots) != len(expected.binding_quantity):
+            raise Exception(f"Functions argument slots don't match the inputs binding_quantity. Given {len(node.argument_slots)} arguments, but accepts {len(expected.binding_quantity)}")
+        for argument_slot, binding_set in zip(node.argument_slots, expected.binding_quantity):
+            if argument_slot.nested_depth < binding_set.nested_depth:
+                raise Exception(f"Input is of to low nested_depth {argument_slot.nested_depth} to {binding_set.nested_depth}")
+            depth_difference = max(depth_difference, binding_set.nested_depth - argument_slot.nested_depth)
+        return depth_difference
+    raise Exception(f"Function can't map from non-set. Given type: {type(node)}")
 
-
-@dataclass(frozen=True)
-class Expression:
-    root_node: Node
 
 
 def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
-    """ Returns the list of nodes that lead to the cycle as paremters """
+    """ Returns the list of nodes that lead to the cycle as parents """
     # Use simple BFS. TODO: Upgrade to bidirectional BFS for efficiency
+    # TODO: Issue what if two different paths of same lenght lead to start_node; need to return multiple paths
     queue = deque([(start_node, 0)])
-    parent_nodes = {start_node: None}
-    visited = {hash(start_node)}
+    parent_nodes: Dict[Node, Union[None, Node]] = {start_node: None}
+    visited = {id(start_node)}
 
     while queue:
         node, cycle_length = queue.popleft()
@@ -529,10 +516,11 @@ def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
 
             for edge in argument_slot.edge_sequence:
                 child_node = edge.to_node
-                hash_val = hash(child_node)
-                new_cycle_length = _add_values(cycle_length, sub_cycle_length)
+                hash_val = id(child_node)
                 if hash_val in visited:
                     continue
+
+                new_cycle_length = _add_values(cycle_length, sub_cycle_length)
                 visited.add(hash_val)
                 parent_nodes[child_node] = node
                 queue.append((child_node, new_cycle_length))
@@ -541,40 +529,41 @@ def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
     raise Exception("No cycle found")
 
 
+# SIMPLE OPERATIONS ON NUMBERS AND COMPARISONS
 def _is_greater(lhs: Union[int, float, Node], rhs: Union[int, float, Node]) -> bool:
     """ Returns if lhs is greater or equal than rhs by simply looking at numbers or node strucutre"""
     if isinstance(lhs, float): return True
     if isinstance(rhs, float): return False
     if isinstance(lhs, int) and isinstance(rhs, int): return lhs >= rhs
-    if not isinstance(lhs, Node): return _is_greater(_int_to_node(lhs), rhs)
-    if not isinstance(rhs, Node): return _is_greater(lhs, _int_to_node(rhs))
+    if not isinstance(lhs, Node): return _is_greater(_to_node(lhs), rhs)
+    if not isinstance(rhs, Node): return _is_greater(lhs, _to_node(rhs))
     # TODO: Implement Node comparison on integer valued expressions
     return True
 
 
 def _add_values(weight1: Union[int, float, Node], weight2: Union[int, float, Node]) -> Union[int, float, Node]:
     """ Helper function to add together two nodes """
-    if isinstance(weight1, Variable):
+    if isinstance(weight1, Node):
         return operations["add"](weight1, _to_node(weight2))
-    if isinstance(weight2, Variable):
+    if isinstance(weight2, Node):
         return operations["add"](_to_node(weight1), weight2)
     return weight1 + weight2
 
 
 def _sub_values(weight1: Union[int, float, Node], weight2: Union[int, float, Node]) -> Union[int, float, Node]:
     """ Helper function to subtract two nodes """
-    if isinstance(weight1, Variable):
+    if isinstance(weight1, Node):
         return operations["sub"](weight1, _to_node(weight2))
-    if isinstance(weight2, Variable):
+    if isinstance(weight2, Node):
         return operations["sub"](_to_node(weight1), weight2)
     return weight1 - weight2
 
 
 def _mul_values(weight1: Union[int, float, Node], weight2: Union[int, float, Node]) -> Union[int, float, Node]:
     """ Helper function to multiply together two nodes """
-    if isinstance(weight1, Variable):
+    if isinstance(weight1, Node):
         return operations["mul"](weight1, _to_node(weight2))
-    if isinstance(weight2, Variable):
+    if isinstance(weight2, Node):
         return operations["mul"](_to_node(weight1), weight2)
     return weight1 * weight2
 
@@ -582,24 +571,24 @@ def _mul_values(weight1: Union[int, float, Node], weight2: Union[int, float, Nod
 def _int_to_node(val: int) -> Node:
     """ Converts integer value to node strucutre """
     # TODO: Has to implemented
-    return Node(Variable(binding_quantity=(definitions["integers"], )))
+    return Node(Set(binding_quantity=(definitions["integers"], ), nested_depth=0))
 
 
 def _to_node(val: Union[int, float, Node]) -> Node:
-    """ Wraper function to convert integer value or node to node strucutre """
+    """ Wraper function nto convert integer value or node to ode strucutre """
     if isinstance(val, Node):
         return val
-    # TODO
     return _int_to_node(val)
 
 
+# HELPER FUNCTIONS FOR CRM-ALGORITHM
 def _evaluate_node(node: Node, n: int) -> int:
     """ Evaluates a node with common operations on reels and only one object varible """
     # TODO
     raise NotImplementedError("No evaluation implemented yet")
 
 
-def _same_cycle_chain(cycle1: List[Node], cycle2: List[Node]) -> bool:
+def _same_cycle_chain(cycle1: List[Node], cycle2: List[Node], comparison_func: Callable) -> bool:
     """
     Checks if two given cycles are the same.
     Function hearby assumes that both lists are of the same length and the last element is the same.
@@ -614,11 +603,11 @@ def _same_cycle_chain(cycle1: List[Node], cycle2: List[Node]) -> bool:
             if next_node_self in self_argument_slot.get_pointed_nodes() or next_node_other in other_argument_slot.get_pointed_nodes():
                 # Don't check child nodes in currently checked cycle to stop reccursion errors
                 continue
-            if self_argument_slot != other_argument_slot:
+            if not comparison_func(self_argument_slot, other_argument_slot):
                 return False
     return True
 
-def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node]) -> bool:
+def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node], comparison_func: Callable) -> bool:
     """ Helper function to check if two given cycles are the same using lcm reduction """
     cycle1_length = len(cycle1)
     cycle2_length = len(cycle2)
@@ -629,28 +618,47 @@ def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node]) -> bool:
 
     lcm_cycle_self = cycle1 * int(lcm / cycle1_length)
     lcm_cycle_other = cycle2 * int(lcm / cycle2_length)
-    if not _same_cycle_chain(lcm_cycle_self, lcm_cycle_other):
+    if not _same_cycle_chain(lcm_cycle_self, lcm_cycle_other, comparison_func):
         return False
     return True
 
 
-def _reduce_cycles_over_accounting_for_residu(state1: CycleState, state2: CycleState) -> bool:
-    """ CMR-Algorithm for reduction of preidic cyclic graphs """
+def _boolean_cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> bool:
+    """ Gets boolean cmr return """
+    return cmr(state1, state2, comparison_func)[2]
+
+
+def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> Tuple[Union[Node, None], Union[Node, None], bool]:
+    """ Runs cmr algorithm reccursively """
+    # TODO: Extend algorithm to work on multiple nodes after slots are equal
     if state1.idx >= len(state1.edge_sequence) or state2.idx >= len(state2.edge_sequence):
-        return state1.idx == len(state1.edge_sequence) and state2.idx == len(state2.edge_sequence)
+        if state1.idx == len(state1.edge_sequence) and state2.idx == len(state2.edge_sequence):
+            node1 = _get_cycle_nodes(state1.edge_sequence[-1].to_node)[state1.shift]
+            node2 = _get_cycle_nodes(state2.edge_sequence[-1].to_node)[state2.shift]
+            return node1, node2, True
+        edge1 = state1.edge_sequence[state1.idx]
+        edge2 = state2.edge_sequence[state2.idx]
+        return _get_cycle_nodes(edge1.parent_node, edge1.cycle_length)[state1.shift], _get_cycle_nodes(edge2.parent_node, edge2.cycle_length)[state1.shift], False
 
     edge1 = state1.edge_sequence[state1.idx]
     edge2 = state2.edge_sequence[state2.idx]
+
+    # Acyclic case
     if not (edge1.cyclical and edge2.cyclical):
-        return edge1.to_node.primitive_eq(edge2.to_node)
+        if not comparison_func(edge1.to_node, edge2.to_node):
+            return None, None, False
+
+        next_state1 = CycleState(edge_sequence=state1.edge_sequence, idx=state1.idx + 1, shift=0)
+        next_state2 = CycleState(edge_sequence=state2.edge_sequence, idx=state2.idx + 1, shift=0)
+        return cmr(next_state1, next_state2, comparison_func)
 
     # Check cycles
     un_shifted_cycle1 = _get_cycle_nodes(edge1.parent_node, edge1.cycle_length)
     un_shifted_cycle2 = _get_cycle_nodes(edge2.parent_node, edge2.cycle_length)
     cycle1 = un_shifted_cycle1[state1.shift:] + un_shifted_cycle1[:state1.shift]
     cycle2 = un_shifted_cycle2[state2.shift:] + un_shifted_cycle2[:state2.shift]
-    if not _lcm_phase_reduction_valid(cycle1, cycle2):
-        return False
+    if not _lcm_phase_reduction_valid(cycle1, cycle2, comparison_func):
+        return None, None, False
 
     # Get or calculate full length
     len1 = state1.full_cycle_length if state1.full_cycle_length else _mul_values(edge1.weight, edge1.cycle_length)
@@ -658,7 +666,8 @@ def _reduce_cycles_over_accounting_for_residu(state1: CycleState, state2: CycleS
 
     # Symmetry
     if not _is_greater(len1, len2):
-        return _reduce_cycles_over_accounting_for_residu(state2, state1)
+        node2, node1, valid = cmr(state2, state1, comparison_func)
+        return node1, node2, valid
 
     # Calculate overhang and residu
     overhang = _sub_values(len1, len2)
@@ -667,6 +676,8 @@ def _reduce_cycles_over_accounting_for_residu(state1: CycleState, state2: CycleS
     # Find and evaluate residu set
     residu_set = set()
     m = edge1.cycle_length
+    valid = True
+    unvalid_case_node_tuple: set[Tuple[Node, Node]] = set()
     for k in range(1, m):
         n = _evaluate_node(edge1.weight, k) % m
         if n in residu_set:
@@ -674,9 +685,17 @@ def _reduce_cycles_over_accounting_for_residu(state1: CycleState, state2: CycleS
         residu_set.add(n)
 
         shifted_state1 = CycleState(edge_sequence=state1.edge_sequence, idx=state1.idx, shift=(state1.shift + n) % m, full_cycle_length=overhang)
-        if not _reduce_cycles_over_accounting_for_residu(shifted_state1, next_state2):
-            return False
+        node1, node2, this_valid = cmr(shifted_state1, next_state2, comparison_func)
+        if not this_valid:
+            valid = False
+            unvalid_case_node_tuple.add((node1, node2))
 
-    return True
+    if not valid:
+        if len(unvalid_case_node_tuple) == 1:
+            pair = list(unvalid_case_node_tuple)[0]
+            return pair[0], pair[1], False
+        return None, None, False
+
+    return un_shifted_cycle1[state1.shift], un_shifted_cycle2[state2.shift], True
 
 
