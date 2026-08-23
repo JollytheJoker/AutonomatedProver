@@ -83,7 +83,7 @@ class Set(Object):
             if self.binding_quantity:
                 return f'{self.quantor} Set_{self.obj_id} ⊆ {"" if self.nested_depth == 1 else f"P^{self.nested_depth - 1}("}{str(self.binding_quantity[0]) if len(self.binding_quantity) == 1 else "x".join(str(b) for b in self.binding_quantity)}{"" if self.nested_depth == 1 else ")"}'
             return f'{self.quantor} ElementrySet_{self.obj_id}'
-        return f'{self.quantor} Variable_{self.obj_id} ∈ '
+        return f'{self.quantor} Variable_{self.obj_id} ∈ {"x".join(str(binding) for binding in self.binding_quantity)}'
 
 
 @dataclass(frozen=True, eq=False)

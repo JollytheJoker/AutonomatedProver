@@ -6,6 +6,13 @@ from dataclasses import dataclass, field, replace
 from MObject import Object, Set, Function, Quantor
 from typing import Tuple, Dict, List, Generator, Union, NamedTuple, Callable
 from Definitions import definitions, operations
+from warnings import warn
+
+
+@dataclass
+class CycleContext:
+    results: Dict[int, Tuple[bool, Union[int, float, Node]]] = field(default_factory=dict) # Fully calculated results
+    active_edges: Dict[int, int] = field(default_factory=dict) # Currently calculated edges
 
 
 @dataclass(frozen=True)
@@ -19,27 +26,36 @@ class Edge:
 
     def __eq__(self, other: Edge):
         """ Compare weights. Only compare memory values of to_node and parent_node to avoid reccursion errors on cyclical graphs """
-        return self.weight == other.weight and self.to_node is other.to_node and self.parent_node is other.parent_node
+        return _equal_values(self.weight, other.weight) and self.to_node is other.to_node and self.parent_node is other.parent_node
 
-    def check_validity(self) -> bool:
+    def __post_init__(self):
         """
         Checks validity of edge by checking if weight is int, infinite, or the node's object's binding status is a natural number.
         If an edge's weight is not 1, it must be a cyclical definition in the graph as it will not be addressed multiple times
         """
         if self.weight != 1:
             if not self.cyclical:
-                return False
+                raise Exception(f"Edge is acycical but got assigned a non-1 valued weight: {self.weight}")
         if isinstance(self.weight, int):
-            return True
-        if isinstance(self.weight, float):
-            return self.weight == float("inf")
-        if isinstance(self.weight, Node):
+            pass
+        elif isinstance(self.weight, float):
+            if self.weight != float("inf"):
+                raise Exception("Edge weight must be infinite but got finite float value {self.weight}")
+        elif isinstance(self.weight, Node):
             node_object = self.weight.node_object
             if len(node_object.binding_quantity) != 1:
-                return False
-            # TODO: Check that node_object really is variable (wait for object's refactor)
-            return node_object.binding_quantity[0] == definitions['integers']
-        return False
+                raise Exception(f"Edge weight {self.weight} is not integer valued")
+
+            if isinstance(node_object, Set) and node_object.nested_depth == 0:
+                arg_binding = node_object.binding_quantity
+                if len(arg_binding) == 1:
+                    arg_binding = arg_binding[0]
+            else:
+                arg_binding = node_object
+            if arg_binding == definitions['integers']:
+                raise Exception(f"Edge weight {self.weight} is not integer valued")
+        else:
+            raise Exception(f"Edge weight is {self.weight} but must be integer, initity or integer expression")
 
     # Cyclical check
     @cached_property
@@ -50,22 +66,35 @@ class Edge:
         The cylce length is the exact number of applications done to return to the original node
         """
         visited = set()
-        parent_hash = id(self.parent_node)
-        nodes_queue = deque([(self.to_node, 0)])
+        parent_id = id(self.parent_node)
+        nodes_queue = deque([(self.to_node, 1)])
+
+        if id(self.to_node) == parent_id:
+            return True, 1
+
         while nodes_queue:
             node, cycle_length = nodes_queue.popleft()
             for argument_slot in node.argument_slots:
                 sub_cycle_length = 1
-                for edge in argument_slot.edge_sequence:
+                for i, edge in enumerate(argument_slot.edge_sequence):
                     child_node = edge.to_node
-                    hash_val = id(child_node)
+                    id_val = id(child_node)
                     new_cycle_length = _add_values(cycle_length, sub_cycle_length)
-                    if hash_val == parent_hash:
+
+                    if id_val == parent_id:
                         return True, new_cycle_length
-                    if hash_val in visited:
+                    if id_val in visited:
                         continue
-                    visited.add(hash_val)
+
+                    visited.add(id_val)
                     nodes_queue.append((child_node, new_cycle_length))
+
+                    # Only iterate to the next to last edge, as the last edge is either acyclical or is in the currently discovered cycle (preventing reccursion errors)
+                    # Last edge (weight is not important to sub_cycle_length)
+                    if i == len(argument_slot.edge_sequence) - 1:
+                        sub_cycle_length = _add_values(sub_cycle_length, 1)
+                        continue
+
                     # Add the cycle length of the edge to the sub_cycle_length to increase cylce_length of next edges to account for
                     sub_cycle_length = _add_values(sub_cycle_length, _mul_values(edge.cycle_length, edge.weight))
         return False, 0
@@ -85,13 +114,13 @@ class ArgumentSlot:
     """
     Sequence of edges
     """
-    edge_sequence: Tuple[Edge, ...]
     parent_node: Node
     desired_output: Object
+    edge_sequence: Tuple[Edge, ...] = field(default_factory=tuple)
 
     @cached_property
     def output_object(self) -> Object:
-        """ The reccursive output of the last (or in sequence first) edge as an object """
+        """ The output of the last (or in sequence first) edge as an object """
         obj = self.edge_sequence[0].to_node.node_object
         if isinstance(obj, Set):
             return replace(obj, nested_depth=self.nested_depth)
@@ -100,39 +129,42 @@ class ArgumentSlot:
     @cached_property
     def number_of_applications(self) -> Union[int, float, Node]:
         """ Returns the sum of all edges' cycle lengths """
-        return sum(edge.cycle_length for edge in self.edge_sequence)
+        res = self.edge_sequence[0].cycle_length
+        for edge in self.edge_sequence:
+            res = _add_values(res, edge.cycle_length)
+        return res
 
     @cached_property
     def nested_depth(self) -> int:
         """ Returns the itteratively calculated nested depth of the argument chain """
         child_node = self.edge_sequence[-1].to_node.node_object
-        if isinstance(child_node, Set):
-            nested_depth = child_node.nested_depth
-            for edge in self.edge_sequence[::-1][:-1]:
-                difference = nested_depth - edge.to_node.math_object.binding_quantity[0].nested_depth
-                if difference < 0:
-                    raise Exception(f"Nested depth doesn't suffice for functions input {edge.to_node.math_object}")
-                nested_depth = edge.to_node.math_object.binding_quantity[1].nested_depth + difference
-            return nested_depth
-        return 1
+        if not isinstance(child_node, Set):
+            return 1
+
+        nested_depth = child_node.nested_depth
+        for edge in self.edge_sequence[::-1][:-1]:
+            difference = nested_depth - edge.to_node.math_object.binding_quantity[0].nested_depth
+            if difference < 0:
+                raise Exception(f"Nested depth doesn't suffice for functions input {edge.to_node.math_object}")
+
+            nested_depth = edge.to_node.math_object.binding_quantity[1].nested_depth + difference
+        return nested_depth
 
     @property
     def quantor(self) -> Quantor:
+        """ Checks if any edges node_objects' quantor is not FORALL """
         return Quantor.EXISTS if any(edge.to_node.node_object.quantor == Quantor.EXISTS or edge.to_node.node_object.quantor == Quantor.DEFINE for edge in self.edge_sequence) else Quantor.FORALL
 
     @classmethod
-    def create(cls, edge_sequence: Union[List[Edge], Tuple[Edge, ...]], parent_node: Node, desired_output: Object) -> ArgumentSlot:
-        return cls(cls._simplify(edge_sequence, parent_node), parent_node, desired_output)
+    def create(cls, parent_node: Node, desired_output: Object, edge_sequence: Union[List[Edge], Tuple[Edge, ...]] = tuple()) -> ArgumentSlot:
+        """ Creates a new argument slot. Simplifies edge_sequence """
+        return cls(parent_node, desired_output, cls._simplify(edge_sequence, parent_node))
 
     def compare(self, other: ArgumentSlot, comparison_function: Callable) -> bool:
-        """ General comparison function for given comparator (such as == or id_less_equal) """
-        # Primitve filtering
+        """ General comparison function for given comparator (such as '==' or 'id_less_eq') """
+        # Direct filtering
         if self is other:
             return True
-        if self.number_of_applications != other.number_of_applications:
-            return False
-
-        # Direct check
         if not self.edge_sequence and not other.edge_sequence:
             return True
         if (self.edge_sequence and not other.edge_sequence) or (not self.edge_sequence and other.edge_sequence):
@@ -148,33 +180,47 @@ class ArgumentSlot:
         """ Strict equality check of every edge in argument sequence """
         return self.compare(other, eq)
 
-    def id_less_equal(self, other: ArgumentSlot):
+    def id_less_eq(self, other: ArgumentSlot):
         """ Strict equality check of every edge in argument sequence but without regarding objects id """
         return self.compare(other, id_less_eq)
 
-    def check_validity(self) -> bool:
-        """ Checks if edges are valid and if all sequence's edge's nodes output desired object """
+    def __hash__(self) -> int:
+        return hash((id(self.parent_node), hash(self.desired_output), hash(tuple(id(edge) for edge in self.edge_sequence))))
+
+    def __post_init__(self):
+        """ Checks if edges are valid and if all edge sequence node-objects' output is desired object """
         cyclical_flag = True
         number_of_edges = len(self.edge_sequence)
         for i, edge in enumerate(self.edge_sequence):
+            # If pointed node is not a function graph would terminate. This contradicts the existence of next values in the slot
             if i < number_of_edges - 1:
                 if not isinstance(edge.to_node.math_object, Function):
-                    return False
+                    raise Exception(f"Since argument slot {self} has more edges after {edge}, this edge can't be a non-function")
 
             # If the last edge wasn't cyclical, we can't have new edges going out from this node as it is never reached again
             if not cyclical_flag:
-                return False
+                raise Exception(f"Last edge was acyclical, but given is additional edge {edge}")
             if not edge.cyclical:
                 cyclical_flag = False
 
-            if not edge.check_validity():
-                return False
-            if edge.to_node.node_object != self.desired_output:
-                return False
-        return True
+            # Edge valid as slot argument
+            if not edge.to_node.node_object.binding_quantity:
+                edge_binding = (edge.to_node.node_object, )
+            else:
+                edge_binding = edge.to_node.node_object.binding_quantity
+            if not self.desired_output.binding_quantity:
+                desired_binding = (self.desired_output, )
+            else:
+                desired_binding = self.desired_output.binding_quantity
+            if edge_binding != desired_binding:
+                raise Exception(f"Edge's binding_quantity doesn't match the desired output {edge_binding} vs. {desired_binding}")
 
     def get_pointed_nodes(self) -> Tuple[Node, ...]:
         return tuple(edge.to_node for edge in self.edge_sequence)
+
+    @cached_property
+    def get_pointed_ids(self) -> Tuple[int, ...]:
+        return tuple(id(edge.to_node) for edge in self.edge_sequence)
 
     @staticmethod
     def _simplify(edge_sequence: Union[List[Edge], Tuple[Edge, ...]], parent_node: Node) -> Tuple[Edge, ...]:
@@ -200,6 +246,7 @@ class CycleState(NamedTuple):
     idx: int = 0
     shift: int = 0
 
+
 @dataclass(frozen=True, eq=False)
 class Node:
     """
@@ -214,64 +261,109 @@ class Node:
         if not self.argument_slots:
             return self.math_object
 
-        quantor = Quantor.EXISTS if any(
-            argument_slots.quantor == Quantor.EXISTS or argument_slots.quantor == Quantor.DEFINE for argument_slots in
-            self.argument_slots) else Quantor.FORALL
+        # Combination of quantors in slots
+        quantor = Quantor.EXISTS if any(argument_slots.quantor == Quantor.EXISTS or argument_slots.quantor == Quantor.DEFINE for argument_slots in self.argument_slots) else Quantor.FORALL
         standart_output = _get_object_instance_of_functions_standart_output(self.math_object)
 
         # Get the output type by checking if any input is set instead of variable if variable was given. E.g., f(X) will be a set, but the output of x was normally defined as output variables.
         difference = _get_nested_depth_difference(self, self.math_object.binding_quantity[0])
 
-        standart_output.__setattr__("obj_id", None)
+        # Set obj_id to None, since the output object is not a formally defined object
         if isinstance(standart_output, Set):
-            return replace(standart_output, nested_depth=standart_output.nested_depth + difference, quantor=quantor)
-        return replace(standart_output, quantor=quantor)
+            res = replace(standart_output, nested_depth=standart_output.nested_depth + difference, quantor=quantor)
+            res.__dict__["obj_id"] = None
+            return res
+        res = replace(standart_output, quantor=quantor)
+        res.__dict__["obj_id"] = None
+        return res
 
-    def check_validity(self) -> bool:
+    def __post_init__(self):
         """ If node has argument slots checks if math_object is of type function """
         if self.argument_slots:
             if not isinstance(self.math_object, Function):
-                return False
-            if len(self.argument_slots) == len(self.math_object.binding_quantity):
-                return False
-        return True
+                raise Exception(f"Since argument slots exist this node must be a function, but isn't {type(self.math_object)}")
+            if len(self.argument_slots) != max(len(self.math_object.binding_quantity[0].binding_quantity), 1):
+                raise Exception(f"Number of argument slots {len(self.argument_slots)} doesn't match number of binding_quantity input sets {len(self.math_object.binding_quantity[0].binding_quantity)}")
 
     def __call__(self, *args) -> Node:
         """
         Makes node creation easier for user.
         When calling on a node with arguments, given objects are automatically input into argument slots.
         """
+        # Call is valid?
         if not isinstance(self.math_object, Function):
             raise TypeError("Node's math_object must be of type function to be called")
-        if len(args) != len(self.math_object.binding_quantity):
-            raise TypeError(f"{self.math_object} must be given exacltly {self.math_object.binding_quantity} arguments")
+        if len(args) != max(len(self.math_object.binding_quantity[0].binding_quantity), 1):
+            raise Exception(f"{self.math_object} must be given exacltly {len(self.math_object.binding_quantity[0].binding_quantity)} arguments")
+
+        # Define new argument slots checking for input types and generating nodes/edges accordingly
         new_argument_slots = []
-        for i, arg, binding in enumerate(zip(args, self.math_object.binding_quantity)):
+        binding_quantity = self.math_object.binding_quantity[0].binding_quantity if self.math_object.binding_quantity[0].binding_quantity else (self.math_object.binding_quantity)
+        for i, (arg, binding) in enumerate(zip(args, binding_quantity)):
             if isinstance(arg, Object):
                 # If arg is an object, we add it as a direct new node argument of the function
-                if arg != binding:
-                    raise TypeError(f"{self.math_object} must be given object of type {binding} at position {i}")
+                if isinstance(arg, Set) and arg.nested_depth == 0:
+                    arg_binding = arg.binding_quantity
+                    if len(arg_binding) == 1:
+                        arg_binding = arg_binding[0]
+                else:
+                    arg_binding = arg
+                if arg_binding != binding:
+                    raise Exception(f"{self.math_object} must be given object of type {binding} at position {i}")
+
                 arg_slot = ArgumentSlot(edge_sequence=(Edge(to_node=Node(arg), weight=1, parent_node=self), ), parent_node=self, desired_output=binding)
                 new_argument_slots.append(arg_slot)
-            if isinstance(arg, Node):
+
+            elif isinstance(arg, Node):
                 # If arg is a node, we add it as a direct argument of the function
-                if arg.math_object != binding:
-                    raise TypeError(f"{self.math_object} must be given object of type {binding} at position {i}")
+                if not arg.math_object.binding_quantity:
+                    arg_binding = (arg.math_object, )
+                else:
+                    arg_binding = arg.math_object.binding_quantity
+                if not binding.binding_quantity:
+                    binding_quantity = (binding, )
+                else:
+                    binding_quantity = binding.binding_quantity
+
+                if arg_binding != binding_quantity:
+                    raise Exception(f"{self.math_object} must be given object of type {binding} at position {i}")
                 arg_slot = ArgumentSlot(edge_sequence=(Edge(to_node=arg, weight=1, parent_node=self), ), parent_node=self, desired_output=binding)
                 new_argument_slots.append(arg_slot)
-            # TODO: implement other input types for node creation
-            raise NotImplementedError("Other inputs for functions aren't yet implemented")
+
+            else:
+                # TODO: implement other input types for node creation
+                raise NotImplementedError("Other inputs for functions aren't yet implemented")
         return Node(self.math_object, argument_slots=tuple(new_argument_slots))
 
     def __str__(self) -> str:
-        """ Recursively prints the node and its children in a tree structure """
         if self.argument_slots:
             res = f'{self.math_object}('
+
             for arg_slot in self.argument_slots:
-                if any(edge.cyclical for edge in arg_slot.edge_sequence):
-                    # TODO: implement __str__ function for cyclical edges
-                    raise NotImplementedError("__str__ function for cyclical edge containing slots isn't yet implemented")
-                res += str(arg_slot.edge_sequence[0].to_node) + ', '
+                # Since this is an argument for validity of the argument slot edges have to be cyclical if there is a next edge (except an infinite case)
+                for edge in arg_slot.edge_sequence:
+                    if edge.cyclical:
+                        cycle = _get_cycle_nodes(edge.parent_node)
+
+                        for cycle_node in cycle[1:]:
+                            if '_' in res:
+                                res.replace('_', f'{cycle_node.math_object}(')
+                            else:
+                                res += f'{cycle_node.math_object}('
+                            for inner_arg_slot in cycle_node.argument_slots:
+                                # Avoid reccursion
+                                if any(edge in cycle for edge in inner_arg_slot.edge_sequence):
+                                    res += '_'
+                                res += str(inner_arg_slot) + ', '
+                            res = res[:-2] + ')'
+                        res += f'^({str(edge.weight)})'
+                    else:
+                        to_node = arg_slot.edge_sequence[0].to_node
+                        if to_node is self:
+                            res += '..., '
+                        res += str(arg_slot) + ', '
+
+                res += ', '
             return res[:-2] + ')'
         return f'{self.math_object}'
 
@@ -279,7 +371,7 @@ class Node:
         return hash(tuple([hash(self.math_object)] + [hash(arg_slot) for arg_slot in self.argument_slots]))
 
     def compare(self, other: Node, comparison_function: Callable) -> bool:
-        """ General comparison function for given comparator (such as == or id_less_equal) """
+        """ General comparison function for given comparator (such as == or id_less_eq) """
         if self is other:
             return True
         if self.math_object != other.math_object:
@@ -311,8 +403,8 @@ class Node:
             if print_trace: print(f"False: Type didn't match: {type(self_obj)} & {type(other_obj)}")
             return False
 
-        # Two applications (thus obj_id = -1) can only equal if their functions are equal and child_nodes are primitively equal
-        if self_obj.obj_id == other_obj.obj_id == -1:
+        # Two applications (thus obj_id = None) can only equal if their functions are equal and child_nodes are primitively equal
+        if self_obj.obj_id is other_obj.obj_id is None:
             if self.math_object == other.math_object:
                 if len(self.argument_slots) != len(other.argument_slots):
                     return False
@@ -337,7 +429,7 @@ class Node:
             return False
 
         # Special case: Obj_ids
-        if self_obj.obj_id != -1 and other_obj.obj_id != -1:
+        if self_obj.obj_id and other_obj.obj_id:
             if self_obj.binding_quantity == other_obj.binding_quantity and (self_obj.quantor == Quantor.FORALL or other_obj.quantor == Quantor.FORALL):
                 if print_trace: print(f"True: Node object's type and binding status equal. Since both are for all over same domain, the objects are the same {self} == {other}")
                 return True
@@ -352,7 +444,7 @@ class Node:
             if self_obj.nested_depth != other_obj.nested_depth:
                 return False
 
-        if print_trace: print(f"True: Node object's type {'and object ids are' if self_obj.obj_id == -1 or other_obj.obj_id == -1 else 'is'} equal")
+        if print_trace: print(f"True: Node object's type {'and object ids are' if self_obj.obj_id is None or other_obj.obj_id is None else 'is'} equal")
         return True
 
     def primitive_contains(self, other: Node, visited: set = None, print_trace: bool = False) -> Generator[Tuple[Node, Union[Node, None]]]:
@@ -411,19 +503,18 @@ class Node:
                 f"Can't map, because child chains don't match: {len(self.argument_slots)} & {len(other.argument_slots)}")
             return mapping, False
 
-        # CMR until either equal or leave-node
+        # CMR TO EQUAL OR LEAVE-NODE CASE
         for self_argument_slot, other_argument_slot in zip(self.argument_slots, other.argument_slots):
             state_self = CycleState(edge_sequence=list(self_argument_slot.edge_sequence))
             state_other = CycleState(edge_sequence=list(other_argument_slot.edge_sequence))
 
             self_reduced, other_reduced, valid_cmr = cmr(state_self, state_other, eq)
-            if valid_cmr:
-                mapping, valid = self_reduced.get_mappings_dict_for_replacement(other_reduced, mapping, print_trace)
-                if not valid:
+            # If CMR under strict equality is false, we would need to map the exit point's nodes to each other
+            if not valid_cmr:
+                # CMR can fataly fail such that not even mapping works for comparison, e.g., when cycles have different phase shifts that might require differend node-mappings
+                if not self_reduced or not other_reduced:
                     return mapping, False
-            else:
-                if self_reduced and other_reduced:
-                    mapping[self_reduced] = other_reduced
+                mapping[self_reduced] = other_reduced
 
         return mapping, True
 
@@ -459,70 +550,81 @@ def eq(obj, other):
 
 def id_less_eq(obj, other):
     if isinstance(obj, ArgumentSlot) or isinstance(obj, Node):
-        return obj.id_less_equal(other)
-    raise Exception(f"Can not compare {obj} and {other}, id_less_equal is not defined for {type(obj)}")
+        return obj.id_less_eq(other)
+    raise Exception(f"Can not compare {obj} and {other}, id_less_eq is not defined for {type(obj)}")
 
 # HELPER FUNCTIONS FOR NODE OBJECT CREATION
 def _get_object_instance_of_functions_standart_output(obj: Object) -> Object:
     """ Returns an instance of an element in the functions standart output """
-    if isinstance(obj, Function):
-        image_set = obj.binding_quantity[1]
-        if isinstance(image_set, Set):
-            if image_set.nested_depth == 0:
-                raise Exception("Can't map onto one variable")
-            return replace(image_set, nested_depth=image_set.nested_depth - 1)
-        else:
-            raise Exception(f"Unmappable type {type(image_set)}")
-    raise Exception(f"Can only give instance for function-type arguments")
+    if not isinstance(obj, Function):
+        raise Exception(f"Can only give instance for function-type arguments")
+
+    image_set = obj.binding_quantity[1]
+    if not isinstance(image_set, Set):
+        raise Exception(f"Unmappable type {type(image_set)}")
+
+    if image_set.nested_depth == 0:
+        raise Exception("Can't map onto one variable")
+
+    if not image_set.binding_quantity:
+        return Set(binding_quantity=(image_set, ), nested_depth=image_set.nested_depth - 1)
+    return replace(image_set, nested_depth=image_set.nested_depth - 1)
 
 def _get_nested_depth_difference(node: Node, expected: Object) -> int:
     """ Given one expected object calculates by how much expected objects nested_depht must be changed if any node's input slots leaf values is of higher nested_depth """
     depth_difference = 0
-    if isinstance(expected, Set):
-        if expected.nested_depth == 0:
-            raise Exception("Can't map from one variable")
-        if len(node.argument_slots) != len(expected.binding_quantity):
-            raise Exception(f"Functions argument slots don't match the inputs binding_quantity. Given {len(node.argument_slots)} arguments, but accepts {len(expected.binding_quantity)}")
-        for argument_slot, binding_set in zip(node.argument_slots, expected.binding_quantity):
-            if argument_slot.nested_depth < binding_set.nested_depth:
-                raise Exception(f"Input is of to low nested_depth {argument_slot.nested_depth} to {binding_set.nested_depth}")
-            depth_difference = max(depth_difference, binding_set.nested_depth - argument_slot.nested_depth)
-        return depth_difference
-    raise Exception(f"Function can't map from non-set. Given type: {type(node)}")
+    if not isinstance(expected, Set):
+        raise Exception(f"Function can't map from non-set. Given type: {type(node)}")
 
+    if expected.nested_depth == 0:
+        raise Exception("Can't map from one variable")
 
+    if not expected.binding_quantity:
+        expected = Set(binding_quantity=(expected, ), nested_depth=expected.nested_depth, quantor=expected.quantor)
+
+    if len(node.argument_slots) != len(expected.binding_quantity):
+        raise Exception(f"Functions argument slots don't match the inputs binding_quantity. Given {len(node.argument_slots)} arguments, but accepts {len(expected.binding_quantity)}")
+
+    for argument_slot, binding_set in zip(node.argument_slots, expected.binding_quantity):
+        if argument_slot.nested_depth + 1 < binding_set.nested_depth:
+            raise Exception(f"Input is of to low nested_depth {argument_slot.nested_depth} to {binding_set.nested_depth}")
+        depth_difference = max(depth_difference, argument_slot.nested_depth - binding_set.nested_depth + 1)
+
+    return depth_difference
 
 def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
     """ Returns the list of nodes that lead to the cycle as parents """
-    # Use simple BFS. TODO: Upgrade to bidirectional BFS for efficiency
+    # Use simple BFS TODO: Upgrade to bidirectional BFS for efficiency
     # TODO: Issue what if two different paths of same lenght lead to start_node; need to return multiple paths
     queue = deque([(start_node, 0)])
-    parent_nodes: Dict[Node, Union[None, Node]] = {start_node: None}
-    visited = {id(start_node)}
+    parent_nodes: Dict[int, Union[None, Node]] = {id(start_node): None}
+    visited = set()
 
     while queue:
         node, cycle_length = queue.popleft()
 
-        if node is start_node:
-            if cycle_length == desired_length or desired_length == -1:
-                path = []
-                while node:
-                    path.append(node)
-                    node = parent_nodes[node]
-                return path
-
         for argument_slot in node.argument_slots:
             sub_cycle_length = 1
-
             for edge in argument_slot.edge_sequence:
                 child_node = edge.to_node
-                hash_val = id(child_node)
-                if hash_val in visited:
+
+                if child_node is start_node:
+                    if not _equal_values(_add_values(cycle_length, sub_cycle_length), desired_length) and desired_length != -1:
+                        continue
+
+                    path = []
+                    while node:
+                        path.append(node)
+                        node = parent_nodes[id(node)]
+                    return path[::-1]
+
+                id_val = id(child_node)
+                if id_val in visited:
                     continue
 
                 new_cycle_length = _add_values(cycle_length, sub_cycle_length)
-                visited.add(hash_val)
-                parent_nodes[child_node] = node
+                visited.add(id_val)
+                parent_nodes[id_val] = node
                 queue.append((child_node, new_cycle_length))
                 # Add the cycle length of the edge to the sub_cycle_length to increase cylce_length of next edges to account for
                 sub_cycle_length = _add_values(sub_cycle_length, _mul_values(edge.cycle_length, edge.weight))
@@ -530,6 +632,15 @@ def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
 
 
 # SIMPLE OPERATIONS ON NUMBERS AND COMPARISONS
+def _equal_values(lhs: Union[int, float, Node], rhs: Union[int, float, Node]) -> bool:
+    """ Returns if lhs is equal to rhs by comparing nodes if neseccary"""
+    if isinstance(lhs, float): return rhs == float("inf")
+    if isinstance(lhs, int) and isinstance(rhs, int): return lhs == rhs
+    if not isinstance(lhs, Node): return _equal_values(_to_node(lhs), rhs)
+    if not isinstance(rhs, Node): return _equal_values(lhs, _to_node(rhs))
+    # TODO: Implement Node comparison on integer valued expressions
+    return True
+
 def _is_greater(lhs: Union[int, float, Node], rhs: Union[int, float, Node]) -> bool:
     """ Returns if lhs is greater or equal than rhs by simply looking at numbers or node strucutre"""
     if isinstance(lhs, float): return True
@@ -582,8 +693,10 @@ def _to_node(val: Union[int, float, Node]) -> Node:
 
 
 # HELPER FUNCTIONS FOR CRM-ALGORITHM
-def _evaluate_node(node: Node, n: int) -> int:
+def _evaluate_node(node: Union[int, float, Node], n: int) -> int:
     """ Evaluates a node with common operations on reels and only one object varible """
+    if isinstance(node, int):
+        return node
     # TODO
     raise NotImplementedError("No evaluation implemented yet")
 
@@ -597,10 +710,12 @@ def _same_cycle_chain(cycle1: List[Node], cycle2: List[Node], comparison_func: C
     for i, (self_node, other_node) in enumerate(zip(cycle1[:-1], cycle2[:-1])):
         if len(self_node.argument_slots) != len(other_node.argument_slots):
             return False
+
         next_node_self = cycle1[i + 1]
         next_node_other = cycle2[i + 1]
+
         for self_argument_slot, other_argument_slot in zip(self_node.argument_slots, other_node.argument_slots):
-            if next_node_self in self_argument_slot.get_pointed_nodes() or next_node_other in other_argument_slot.get_pointed_nodes():
+            if id(next_node_self) in self_argument_slot.get_pointed_ids or id(next_node_other) in other_argument_slot.get_pointed_ids:
                 # Don't check child nodes in currently checked cycle to stop reccursion errors
                 continue
             if not comparison_func(self_argument_slot, other_argument_slot):
@@ -630,35 +745,45 @@ def _boolean_cmr(state1: CycleState, state2: CycleState, comparison_func: Callab
 
 def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> Tuple[Union[Node, None], Union[Node, None], bool]:
     """ Runs cmr algorithm reccursively """
-    # TODO: Extend algorithm to work on multiple nodes after slots are equal
-    if state1.idx >= len(state1.edge_sequence) or state2.idx >= len(state2.edge_sequence):
-        if state1.idx == len(state1.edge_sequence) and state2.idx == len(state2.edge_sequence):
-            node1 = _get_cycle_nodes(state1.edge_sequence[-1].to_node)[state1.shift]
-            node2 = _get_cycle_nodes(state2.edge_sequence[-1].to_node)[state2.shift]
-            return node1, node2, True
-        edge1 = state1.edge_sequence[state1.idx]
-        edge2 = state2.edge_sequence[state2.idx]
-        return _get_cycle_nodes(edge1.parent_node, edge1.cycle_length)[state1.shift], _get_cycle_nodes(edge2.parent_node, edge2.cycle_length)[state1.shift], False
+    # TODO: Maybe add memory to stop reccursion errors for already compared nodes
+    # TODO: Deal with infinites edges; especially if both are infinite, last edge in sequence can also be cyclical running into indexing errors!
+
+    # Termination
+    if state1.idx >= len(state1.edge_sequence) and state2.idx >= len(state2.edge_sequence):
+        new_node1 = state1.edge_sequence[-1].to_node
+        new_node2 = state2.edge_sequence[-1].to_node
+        if not comparison_func(new_node1, new_node2):
+            return new_node1, new_node2, False
+        return None, None, True
 
     edge1 = state1.edge_sequence[state1.idx]
     edge2 = state2.edge_sequence[state2.idx]
 
     # Acyclic case
     if not (edge1.cyclical and edge2.cyclical):
-        if not comparison_func(edge1.to_node, edge2.to_node):
-            return None, None, False
+        # TODO: Running reccursive check here is overkill, only need to check next layer, reccursion comes form afterward application of cmr in return
+        if edge1.cyclical:
+            new_node1 = _get_cycle_nodes(edge1.parent_node, edge1.cycle_length)[state1.shift] # Maybe shift + 1 with mod
+        else:
+            new_node1 = edge1.to_node
 
-        next_state1 = CycleState(edge_sequence=state1.edge_sequence, idx=state1.idx + 1, shift=0)
-        next_state2 = CycleState(edge_sequence=state2.edge_sequence, idx=state2.idx + 1, shift=0)
-        return cmr(next_state1, next_state2, comparison_func)
+        if edge2.cyclical:
+            new_node2 = _get_cycle_nodes(edge2.parent_node, edge2.cycle_length)[state2.shift]
+        else:
+            new_node2 = edge2.to_node
+
+        if not comparison_func(new_node1, new_node2):
+            return new_node1, new_node2, False
+        return None, None, True
 
     # Check cycles
-    un_shifted_cycle1 = _get_cycle_nodes(edge1.parent_node, edge1.cycle_length)
-    un_shifted_cycle2 = _get_cycle_nodes(edge2.parent_node, edge2.cycle_length)
+    un_shifted_cycle1 = _get_cycle_nodes(edge1.parent_node) #, edge1.cycle_length)
+    un_shifted_cycle2 = _get_cycle_nodes(edge2.parent_node) #, edge2.cycle_length)
     cycle1 = un_shifted_cycle1[state1.shift:] + un_shifted_cycle1[:state1.shift]
     cycle2 = un_shifted_cycle2[state2.shift:] + un_shifted_cycle2[:state2.shift]
+    #breakpoint()
     if not _lcm_phase_reduction_valid(cycle1, cycle2, comparison_func):
-        return None, None, False
+        return cycle1[0], cycle2[0], False
 
     # Get or calculate full length
     len1 = state1.full_cycle_length if state1.full_cycle_length else _mul_values(edge1.weight, edge1.cycle_length)
@@ -671,6 +796,11 @@ def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union
 
     # Calculate overhang and residu
     overhang = _sub_values(len1, len2)
+    if _equal_values(overhang, 0):
+        next_state1 = CycleState(edge_sequence=state1.edge_sequence, idx=state1.idx + 1, shift=0)
+        next_state2 = CycleState(edge_sequence=state2.edge_sequence, idx=state2.idx + 1, shift=0)
+        return cmr(next_state1, next_state2, comparison_func)
+
     next_state2 = CycleState(edge_sequence=state2.edge_sequence, idx=state2.idx + 1, shift=0)
 
     # Find and evaluate residu set
@@ -678,7 +808,8 @@ def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union
     m = edge1.cycle_length
     valid = True
     unvalid_case_node_tuple: set[Tuple[Node, Node]] = set()
-    for k in range(1, m):
+
+    for k in range(1, m + 1):
         n = _evaluate_node(edge1.weight, k) % m
         if n in residu_set:
             continue
@@ -696,6 +827,5 @@ def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union
             return pair[0], pair[1], False
         return None, None, False
 
-    return un_shifted_cycle1[state1.shift], un_shifted_cycle2[state2.shift], True
-
+    return None, None, True
 

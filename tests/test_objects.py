@@ -32,7 +32,7 @@ def test_object_creation():
 
 
 def test_id_generation_determinism():
-    """Tests if objects with same signature have different ids"""
+    """Tests if objects with the same signature have different ids"""
     s1 = Set(binding_quantity=())
     s2 = Set(binding_quantity=())
 
