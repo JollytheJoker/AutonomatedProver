@@ -391,6 +391,12 @@ class Node:
         """ Checks if the other node is exactly the same as self, but without checking for ids """
         return self.compare(other, id_less_eq)
 
+    @cached_property
+    def negation(self) -> Node:
+        """ Negates the node's quantors """
+        # TODO: Implement
+        return self
+
     def primitive_eq(self, other: Node, print_trace: bool = False):
         """ Runs primitive equal check between two nodes. They are equal if type and binding quantity are the same """
         if print_trace: print(f"Checking {self} == {other}")
