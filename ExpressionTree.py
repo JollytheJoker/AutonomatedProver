@@ -6,7 +6,6 @@ from dataclasses import dataclass, field, replace
 from MObject import Object, Set, Function, Quantor
 from typing import Tuple, Dict, List, Generator, Union, NamedTuple, Callable
 from Definitions import definitions, operations
-from warnings import warn
 
 
 @dataclass
