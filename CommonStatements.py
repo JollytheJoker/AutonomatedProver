@@ -1,10 +1,10 @@
 import copy
-from typing import Union
+from typing import Union, List, Tuple
 from ExpressionTree import Node
 from MObject import Function, Set, Quantor
 from Statement import Relation, Statement, LogicalOperation, MetaObject, Bool
 from Definitions import definitions
-
+from Knuth_Bendix_Algorithm import knuth_bendix_algorithm, kbo_compare, simplify_statement_on_system, simplify_fully
 
 # Must be refactored after expression tree change
 '''def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
@@ -52,67 +52,95 @@ def continuous(func: Function | Node, metr_input: Function, metr_output: Functio
 
 # ---------------------- BASIC AXIOMS ----------------------
 
-# LOGICAL (https://faculty.uml.edu/tbeke/knuth.pdf)
 # (\land & \lor will be refered to 'o')#
-logical_axioms = {}
+logical_axioms: List[Tuple[Statement, Statement]] = []
 
-# Define 2 placeholders
-a = Statement(MetaObject(Statement))
-b = Statement(MetaObject(Statement))
+# Define 3 placeholders
+a = Statement(MetaObject(Statement, name='A'))
+b = Statement(MetaObject(Statement, name='B'))
+c = Statement(MetaObject(Statement, name='C'))
 
 # NEUTRAL
 # a and true = a
 lhs = Statement(LogicalOperation.AND, a, Statement(Bool.TRUE))
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, a)
+logical_axioms.append((lhs, a))
 
 # a or false = a
-lhs = Statement(LogicalOperation.OR, a, Bool.FALSE)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, a)
+lhs = Statement(LogicalOperation.OR, a, Statement(Bool.FALSE))
+logical_axioms.append((lhs, a))
 
 # a and false = false
-lhs = Statement(LogicalOperation.AND, a, Bool.FALSE)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, Bool.FALSE)
+lhs = Statement(LogicalOperation.AND, a, Statement(Bool.FALSE))
+logical_axioms.append((lhs, Statement(Bool.FALSE)))
 
 # a or true = true
-lhs = Statement(LogicalOperation.OR, a, Bool.TRUE)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, Bool.TRUE)
+lhs = Statement(LogicalOperation.OR, a, Statement(Bool.TRUE))
+logical_axioms.append((lhs, Statement(Bool.TRUE)))
 
 # DUPLICATES
 # a o a = a
 lhs = Statement(LogicalOperation.AND, a, a)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, a)
+logical_axioms.append((lhs, a))
 
 lhs = Statement(LogicalOperation.OR, a, a)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, a)
+logical_axioms.append((lhs, a))
 
 # COMPLEMENT
 # a and not a = false
 lhs = Statement(LogicalOperation.AND, a, a.negation)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, Bool.FALSE)
+logical_axioms.append((lhs, Statement(Bool.FALSE)))
 
 # a or not a = true
 lhs = Statement(LogicalOperation.OR, a, a.negation)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, Bool.TRUE)
+logical_axioms.append((lhs, Statement(Bool.TRUE)))
 
-'''# Kommutativity a o b = b o a
+# Kommutativity a o b = b o a
 lhs = Statement(LogicalOperation.AND, a, b)
 rhs = Statement(LogicalOperation.AND, b, a)
-logical_axioms[lhs] = Statement(LogicalOperation.EQUAL, lhs, (Statement(LogicalOperation.EQUAL, lhs, rhs))
+logical_axioms.append((lhs, rhs))
 
 lhs = Statement(LogicalOperation.OR, a, b)
 rhs = Statement(LogicalOperation.OR, b, a)
-logical_axioms.append(Statement(LogicalOperation.EQUAL, lhs, rhs))
+logical_axioms.append((lhs, rhs))
 
 # Associativity (a o b) o c = a o (b o c)
 lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.AND, a, b), c)
 rhs = Statement(LogicalOperation.AND, a, Statement(LogicalOperation.AND, b, c))
-logical_axioms.append(Statement(LogicalOperation.EQUAL, lhs, rhs))
+logical_axioms.append((lhs, rhs))
 
 lhs = Statement(LogicalOperation.OR, Statement(LogicalOperation.OR, a, b), c)
 rhs = Statement(LogicalOperation.OR, a, Statement(LogicalOperation.OR, b, c))
-logical_axioms.append(Statement(LogicalOperation.EQUAL, lhs, rhs))'''
+logical_axioms.append((lhs, rhs))
 
-# Distributivity (a or b) and c = (a and c) or (b and c)
+# Distibutivity (a or b) and c = (a and c) or (b and c)
+lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.OR, a, b), c)
+rhs = Statement(LogicalOperation.OR, Statement(LogicalOperation.AND, a, c), Statement(LogicalOperation.AND, b, c))
+logical_axioms.append((lhs, rhs))
+
+
+test_statement = Statement(LogicalOperation.AND, a, Statement(LogicalOperation.OR, a, b))
+
+print("KNUTH-BENDIX-SOLUTION")
+system = knuth_bendix_algorithm(logical_axioms)
+for key, value in system:
+    print(f'Key: {key}, Value: {value}')
+
+print(simplify_fully(test_statement, logical_axioms))
+
+
+
+'''print(lhs)
+print(logical_axioms[-3][1], logical_axioms[-3][0])
+
+s1 = Statement(LogicalOperation.AND, a, b)
+s2 = Statement(LogicalOperation.AND, b, a)
+print(kbo_compare(s1, s2))
+print(kbo_compare(s2, s1))
+
+print(next(lhs.simplify(logical_axioms[-3][1], logical_axioms[-3][0])))'''
+
+'''breakpoint()
+print(next(logical_axioms[-5][0].simplify(logical_axioms[-3][0], logical_axioms[-3][1])))'''
 
 
 # TODO: implement ZFC

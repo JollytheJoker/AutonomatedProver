@@ -104,6 +104,7 @@ class Edge:
 
     @cached_property
     def cycle_length(self) -> int:
+        """ Is the edge's cycle length not regarding its own weight, thus the amount of steps to traverse the cycle once """
         return self._cyclical_information[1]
 
 
@@ -546,6 +547,36 @@ class Node:
         memo[self] = new_node
         return new_node
 
+    @cached_property
+    def kbo_weight(self) -> int:
+        """ Returns the KBO weight for this node the weight will be calculated recursively """
+        weight = 1
+        for argument_slot in self.argument_slots:
+            for edge in argument_slot.edge_sequence:
+                if edge.cyclical:
+                    if isinstance(edge.cycle_length, int) and isinstance(edge.weight, int):
+                        weight += edge.cycle_length * edge.weight
+                    else:
+                        # TODO: Fix edge weights in that case
+                        return int('inf')
+
+        return weight
+
+    def get_all_nodes(self) -> List[Node]:
+        """ Returns a list of all nodes that can be reached from this node """
+        queue = deque([self])
+        visited = [self]
+        while queue:
+            node = queue.popleft()
+
+            for argument_slot in node.argument_slots:
+                for edge in argument_slot.edge_sequence:
+                    new_node = edge.to_node
+
+                    if new_node in visited:
+                        continue
+                    queue.append(new_node)
+        return visited
 
 # UNION OF DIFFERENT OBJECT FUNCTIONS
 def eq(obj, other):
@@ -634,7 +665,6 @@ def _get_cycle_nodes(start_node: Node, desired_length: int = -1) -> List[Node]:
                 # Add the cycle length of the edge to the sub_cycle_length to increase cylce_length of next edges to account for
                 sub_cycle_length = _add_values(sub_cycle_length, _mul_values(edge.cycle_length, edge.weight))
     raise Exception("No cycle found")
-
 
 # SIMPLE OPERATIONS ON NUMBERS AND COMPARISONS
 def _equal_values(lhs: Union[int, float, Node], rhs: Union[int, float, Node]) -> bool:
@@ -742,7 +772,7 @@ def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node], compariso
         return False
     return True
 
-
+# CMR
 def _boolean_cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> bool:
     """ Gets boolean cmr return """
     return cmr(state1, state2, comparison_func)[2]

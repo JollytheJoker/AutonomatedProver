@@ -1,11 +1,12 @@
 from __future__ import annotations
-
 import uuid
+import warnings
 from functools import cached_property
 from typing import Union, Any, Generator, Dict, List, Tuple
 from ExpressionTree import Node
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from MObject import Function, Set
 
 
 class Relation(Enum):
@@ -45,6 +46,9 @@ class Relation(Enum):
             case _:
                 raise ValueError(f"No negation defined for {self}")
 
+    def __str__(self):
+        return str(self.value)
+
 
 class LogicalOperation(Enum):
     AND = 'and'
@@ -71,6 +75,15 @@ class LogicalOperation(Enum):
             return False
         return True
 
+    def __str__(self):
+        if self is LogicalOperation.AND:
+            return '&'
+        if self is LogicalOperation.OR:
+            return '|'
+        if self is LogicalOperation.EQUAL:
+            return 'is'
+        return 'is not'
+
 class Bool(Enum):
     TRUE = 'true'
     FALSE = 'false'
@@ -81,6 +94,10 @@ class Bool(Enum):
             return Bool.FALSE
         return Bool.TRUE
 
+    def __str__(self):
+        if self.value == 'true':
+            return 'T'
+        return 'F'
 
 @dataclass(frozen=True)
 class Statement:
@@ -91,8 +108,8 @@ class Statement:
     Statements or leave nodes must be passed into a relation to make them into boolean expressions.
     """
     node_function: Union[LogicalOperation, Relation, Node, Bool, MetaObject]
-    child_right: Union[Statement, None] = None
     child_left: Union[Statement, None] = None
+    child_right: Union[Statement, None] = None
 
     def __post_init__(self):
         """
@@ -100,7 +117,16 @@ class Statement:
         If children are nodes, then node_function must be a realation.
         If the node_function is a logical operation, then child nodes can't be expression graphs
         If the node_function is an expression graph, they must be a leave node
+        Updates and adds new objects to precedence list
         """
+        # Update precedence
+        if not isinstance(self.node_function, Node):
+            add_precedence(self.node_function)
+        else:
+            # Add all nodes math_object's to precedence list
+            for node in self.node_function.get_all_nodes():
+                add_precedence(node.math_object)
+
         if isinstance(self.node_function, LogicalOperation):
             if not self.child_right or not self.child_left:
                 raise Exception("Logical operations must have children nodes")
@@ -125,10 +151,11 @@ class Statement:
         if _is_of_type(self.node_function, MetaObject) and not self.is_leave_node:
             raise Exception("MetaObject values can't have child nodes")
 
+
     def __str__(self):
         if self.is_leave_node:
             return str(self.node_function)
-        return f'{self.child_left} {self.node_function} {self.child_right}'
+        return f'({str(self.child_left)} {str(self.node_function)} {str(self.child_right)})'
 
     @cached_property
     def output_type(self) -> type:
@@ -174,16 +201,30 @@ class Statement:
                 # Need to negate quantors
                 return replace(self, child_left=self.child_left.negation, child_right=self.child_right.negation)
 
-        if isinstance(self.node_function, Node):
+        if isinstance(self.node_function, Node) or isinstance(self.node_function, MetaObject):
             return replace(self, node_function=self.node_function.negation)
 
         raise Exception(f"Can't negate type {type(self.node_function)}")
 
     @cached_property
-    def term_order(self) -> int:
-        """ Returns the term order of this statement """
-        # TODO: Implement
-        return id(self)
+    def kbo_weight(self) -> int:
+        """ Returns the statement's weight for KBO through reccursion """
+        # Spacial-Case Node
+        if isinstance(self.node_function, Node):
+            weight = self.node_function.kbo_weight
+        else:
+            weight = 1
+
+        if self.child_left:
+            weight += self.child_left.kbo_weight
+        if self.child_right:
+            weight += self.child_right.kbo_weight
+        return weight
+
+    @cached_property
+    def kbo_precedence(self) -> int:
+        """ Returns the kbo precedence of this statement node object """
+        return get_precedence(self.node_function)
 
     def __eq__(self, other: Statement) -> bool:
         """ Strict equality check, going down the expression tree """
@@ -206,6 +247,10 @@ class Statement:
         elif isinstance(self.node_function, MetaObject):
             if not _is_of_type(self.node_function, type(other.node_function)):
                 return False
+            # If other also is meta object and has same name, negation status can't be different
+            if isinstance(other.node_function, MetaObject):
+                if self.node_function.name == other.node_function.name and not self.node_function.negated == other.node_function.negated:
+                    return False
 
         elif not self.node_function == other.node_function:
             return False
@@ -224,14 +269,21 @@ class Statement:
             yield res
 
     def get_replacement_list(self, other: Statement, replacement_list: Union[List[Tuple[Statement, Statement]], None] = None) -> List[Tuple[Statement, Statement]]:
-        """ Retunrs the necessary replacements on this statement to make a step that is only primitvely equal completely equal """
+        """ Returns the necessary replacements on this statement to make a step that is only primitvely equal completely equal """
         if not replacement_list:
             replacement_list = []
 
         # TODO: Requires more depth for node replacement!!!
         if _eq_node_function(self.node_function, other.node_function):
-            replacement_list = self.child_left.get_replacement_list(other.child_left, replacement_list)
-            replacement_list = self.child_right.get_replacement_list(other.child_right, replacement_list)
+            # If both are leave-nodes even if they are same we need to add them to unification process
+            if self.is_leave_node and other.is_leave_node:
+                replacement_list.append((other, self))
+
+            # TODO: What if other has child_nodes?
+            if self.child_left:
+                replacement_list = self.child_left.get_replacement_list(other.child_left, replacement_list)
+            if self.child_right:
+                replacement_list = self.child_right.get_replacement_list(other.child_right, replacement_list)
         else:
             replacement_list.append((other, self))
 
@@ -258,15 +310,17 @@ class Statement:
         """ Checks ats from this node for match_statement structure. If enherits match_statement structure, we will replace it with the simplifaction accordingly """
         if self.primitive_eq(match_statement):
             replacement_list = self.get_replacement_list(match_statement)
-            yield simplification.replace_with_list(replacement_list)
+            if _replacement_list_valid(replacement_list):
+                yield simplification.replace_with_list(replacement_list)
 
         if isinstance(self.child_left, Statement):
             for res in self.child_left.simplify(match_statement, simplification):
-                yield res
+                yield replace(self, child_left=res)
 
         if isinstance(self.child_right, Statement):
             for res in self.child_right.simplify(match_statement, simplification):
-                yield res
+                yield replace(self, child_right=res)
+
 
 
 @dataclass(frozen=True, eq=False)
@@ -284,11 +338,71 @@ class MetaObject:
         return MetaObject(self.obj_type, self.name, negated=(not self.negated))
 
     def __eq__(self, other) -> bool:
-        return self.name == other.name
+        return self.name == other.name and self.obj_type == other.obj_type and self.negated == other.negated
 
     def __hash__(self):
         return hash((self.obj_type, self.name, self.negated))
 
+    def __str__(self):
+        if self.negated:
+            return f'¬{self.name}'
+        return self.name
+
+
+"""
+PRIVATE PRECEDENCE TUPLE LIST (TOP TO BOTTOM)
+LogicalOperation > Relation > Function > Set > MetaObjects(Statement) > Bool
+"""
+_precedence = [
+    [LogicalOperation.AND,
+    LogicalOperation.OR,
+    LogicalOperation.EQUAL,
+    LogicalOperation.NEQUAL],
+
+    [Relation.SUBSET,
+    Relation.SUBSETQ,
+    Relation.SUPPERSET,
+    Relation.SUPPERSETQ,
+    Relation.LE,
+    Relation.LEQ,
+    Relation.GE,
+    Relation.GEQ,
+    Relation.EQUAL,
+    Relation.NEQUAL],
+
+    [],                         # Functions
+    [],                         # Sets
+    [],                         # MetaObjects
+
+    [Bool.TRUE,
+    Bool.FALSE]
+]
+_precedence_type_ordering: List[type] = [LogicalOperation, Relation, Function, Set, MetaObject, Bool]
+
+def add_precedence(obj: Union[LogicalOperation, Relation, Function, Set, MetaObject, Bool]):
+    try:
+        idx = _precedence_type_ordering.index(type(obj))
+    except Exception:
+        raise Exception(f'Unexpected type {type(obj)}')
+
+    if obj in _precedence[idx]:
+        return
+
+    _precedence[idx].append(obj)
+
+def get_precedence(obj: Union[LogicalOperation, Relation, Function, Set, MetaObject, Bool]) -> int:
+    try:
+        precedence_idx = _precedence_type_ordering.index(type(obj))
+        precedence = 0
+        for i in range(precedence_idx):
+            precedence += len(_precedence[i])
+    except Exception:
+        raise Exception(f'Unexpected type {type(obj)}')
+
+    try:
+        return -(precedence + _precedence[precedence_idx].index(obj))
+    except ValueError:
+        raise ValueError(f"Didn't add {obj} to precedence")
 
 # Helper functions for type comparisons
 def _is_of_type(obj: Any, target_type: type) -> bool:
@@ -321,7 +435,7 @@ def _eq_node_function(node_function1: Union[LogicalOperation, Relation, Node, Bo
     if isinstance(node_function1, MetaObject):
         if not isinstance(node_function2, MetaObject):
             return False
-        return node_function1.obj_type == node_function2.obj_type
+        return node_function1 == node_function2
 
     if not node_function1 == node_function2:
         return False
@@ -331,3 +445,28 @@ def _eq_node_function(node_function1: Union[LogicalOperation, Relation, Node, Bo
 def replace_statement_with_other(statement1: Statement, statement2: Statement) -> Statement:
     replacement_list = statement1.get_replacement_list(statement2)
     return statement1.replace_with_list(replacement_list)
+
+def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) -> bool:
+    """ Checks if any key is used twice with different values """
+    # TODO: Can we update to only id search to increase runtime from O(n^2) to O(n)?
+    seen = []
+
+    for key, value in replacement_lst:
+        for old_key, old_value in seen:
+            # Special-case meta_objects
+            if isinstance(key.node_function, MetaObject) and isinstance(old_key.node_function, MetaObject):
+                key_node_function = key.node_function
+                old_key_node_function = old_key.node_function
+                if key_node_function == old_key_node_function.negation:
+                    if value != old_value.negation:
+                        return False
+                    break
+
+            if key == old_key:
+                if value != old_value:
+                    return False
+                break
+        else:
+            seen.append((key, value))
+
+    return True
