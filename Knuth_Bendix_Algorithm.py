@@ -1,5 +1,5 @@
 from typing import List, Tuple, Set
-from Statement import Statement
+from Statement import Statement, kbo_compare
 
 
 def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> List[Tuple[Statement, Statement]]:
@@ -14,12 +14,17 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
         s, t = axiom_system[0]
         axiom_system.pop(0)
 
-        processing.remove((s, t))
-        seen.add((s, t))
+        try:
+            processing.remove((s, t))
+            seen.add((s, t))
+        except KeyError: pass
 
         # Simplify on the current rule book
         simplify_fully(s, temporary_res)
         simplify_fully(t, temporary_res)
+
+        if s == t:
+            continue
 
         # Get ordering
         comparison = kbo_compare(s, t)
@@ -106,19 +111,4 @@ def simplify_fully(s: Statement, system: List[Tuple[Statement, Statement]]):
     return s_old
 
 
-def kbo_compare(lhs: Statement, rhs: Statement):
-    if lhs.kbo_weight != rhs.kbo_weight:
-        return 1 if lhs.kbo_weight > rhs.kbo_weight else -1
 
-    if lhs.kbo_precedence != rhs.kbo_precedence:
-        return 1 if lhs.kbo_precedence > rhs.kbo_precedence else -1
-
-    if lhs.child_left and rhs.child_left:
-        child_compare = kbo_compare(lhs.child_left, rhs.child_left)
-        if child_compare != 0:
-            return child_compare
-
-    if lhs.child_right and rhs.child_right:
-        return kbo_compare(lhs.child_right, rhs.child_right)
-
-    return 0

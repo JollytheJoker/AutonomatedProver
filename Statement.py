@@ -9,6 +9,7 @@ from enum import Enum
 from MObject import Function, Set
 
 
+# Standart Operations (Relations, Logical, Boolen-Values)
 class Relation(Enum):
     SUBSETQ = r'\subseteq'
     SUBSET = r'\subset'
@@ -53,6 +54,8 @@ class Relation(Enum):
 class LogicalOperation(Enum):
     AND = 'and'
     OR = 'or'
+    XOR = 'xor'
+    XNOR = 'xnor'
     EQUAL = '='
     NEQUAL = '!='
 
@@ -66,6 +69,10 @@ class LogicalOperation(Enum):
                 return LogicalOperation.NEQUAL
             case LogicalOperation.NEQUAL:
                 return LogicalOperation.EQUAL
+            case LogicalOperation.XOR:
+                return LogicalOperation.XNOR
+            case LogicalOperation.XNOR:
+                return LogicalOperation.XOR
             case _:
                 raise ValueError(f"No negation defined for {self}")
 
@@ -82,6 +89,10 @@ class LogicalOperation(Enum):
             return '|'
         if self is LogicalOperation.EQUAL:
             return 'is'
+        if self is LogicalOperation.XOR:
+            return '⊕'
+        if self is LogicalOperation.XNOR:
+            return '⊙'
         return 'is not'
 
 class Bool(Enum):
@@ -98,6 +109,20 @@ class Bool(Enum):
         if self.value == 'true':
             return 'T'
         return 'F'
+
+# Properties-class
+@dataclass(frozen=True)
+class OperationProperties:
+    """ A data strucutre that saves canonical properties for an operation in the operations_properties dictionary """
+    associative: bool = False
+    commutative: bool = False
+
+OPERATION_PROPERTIES = {
+    LogicalOperation.AND: OperationProperties(associative=True, commutative=True),
+    LogicalOperation.OR:  OperationProperties(associative=True, commutative=True),
+    LogicalOperation.XOR: OperationProperties(associative=True, commutative=True),
+}
+
 
 @dataclass(frozen=True)
 class Statement:
@@ -117,7 +142,7 @@ class Statement:
         If children are nodes, then node_function must be a realation.
         If the node_function is a logical operation, then child nodes can't be expression graphs
         If the node_function is an expression graph, they must be a leave node
-        Updates and adds new objects to precedence list
+        Updates and adds new objects to a precedence list
         """
         # Update precedence
         if not isinstance(self.node_function, Node):
@@ -225,6 +250,11 @@ class Statement:
     def kbo_precedence(self) -> int:
         """ Returns the kbo precedence of this statement node object """
         return get_precedence(self.node_function)
+
+    @cached_property
+    def canonical(self) -> Statement:
+        """ Returns a canonical version of this statement """
+        return canonicalize_ac(self)
 
     def __eq__(self, other: Statement) -> bool:
         """ Strict equality check, going down the expression tree """
@@ -403,6 +433,94 @@ def get_precedence(obj: Union[LogicalOperation, Relation, Function, Set, MetaObj
         return -(precedence + _precedence[precedence_idx].index(obj))
     except ValueError:
         raise ValueError(f"Didn't add {obj} to precedence")
+
+# AC-CANONIZATION FOR OPERATIONS PROPERTIES
+def canonicalize_ac(statement: Statement) -> Statement:
+    """
+    Canonizes a statement using its node_functions properties given in operation_properties.
+    Resolves into four cases:
+    1. (neither commutative nor associative): return Statement
+    2. (commutative but not associative): swap child-order after KBO
+    3. (associative but not commutative): get flattened arguments and set brackets normalized
+    4. (associative and commutative): get flattened, sorted arguments and set brackets normalized
+    """
+    if statement.is_leave_node:
+        return statement
+
+    left = canonicalize_ac(statement.child_left)
+    right = canonicalize_ac(statement.child_right)
+
+    if not statement.node_function in OPERATION_PROPERTIES:
+        return replace(statement, child_left=left, child_right=right)
+
+    # Commutativitiy only
+    properties = OPERATION_PROPERTIES[statement.node_function]
+    if properties.commutative and not properties.associative:
+        if kbo_compare(statement.child_left, statement.child_right) == 1:
+            return replace(statement, child_left=right, child_right=left)
+        return replace(statement, child_left=left, child_right=right)
+
+    # Operator is associative
+    flattened_statements = flatten(statement)
+
+    if properties.commutative:
+        # Sorts after kbo comparison
+        n = len(flattened_statements)
+        for i in range(n):
+            for j in range(0, n - i - 1):
+                if kbo_compare(flattened_statements[j + 1], flattened_statements[j]) == -1:
+                    flattened_statements[j], flattened_statements[j + 1] = flattened_statements[j + 1], flattened_statements[j]
+
+    #breakpoint()
+    return rebuild(statement.node_function, flattened_statements)
+
+
+def flatten(statement: Statement) -> List[Statement]:
+    """ Returns a flattened list of statement arguments that have the specific node_function """
+    terms = []
+
+    def collect(sub_statement: Statement):
+        if sub_statement.node_function == statement.node_function:
+            if sub_statement.child_left: collect(sub_statement.child_left)
+            if sub_statement.child_right: collect(sub_statement.child_right)
+        else:
+            terms.append(sub_statement)
+
+    collect(statement.child_left)
+    collect(statement.child_right)
+
+    return terms
+
+
+def rebuild(common_operation, statement_list: List[Statement]) -> Statement:
+    """ Rebuilds into a binary statement tree given statement list using right-associativity """
+    if len(statement_list) == 1:
+        return statement_list[0]
+
+    root_statement = statement_list[-1]
+
+    for statement in statement_list[:-1]:
+        root_statement = Statement(common_operation, statement, root_statement)
+
+    return root_statement
+
+# KBO
+def kbo_compare(lhs: Statement, rhs: Statement):
+    if lhs.kbo_weight != rhs.kbo_weight:
+        return 1 if lhs.kbo_weight > rhs.kbo_weight else -1
+
+    if lhs.kbo_precedence != rhs.kbo_precedence:
+        return 1 if lhs.kbo_precedence > rhs.kbo_precedence else -1
+
+    if lhs.child_left and rhs.child_left:
+        child_compare = kbo_compare(lhs.child_left, rhs.child_left)
+        if child_compare != 0:
+            return child_compare
+
+    if lhs.child_right and rhs.child_right:
+        return kbo_compare(lhs.child_right, rhs.child_right)
+
+    return 0
 
 # Helper functions for type comparisons
 def _is_of_type(obj: Any, target_type: type) -> bool:

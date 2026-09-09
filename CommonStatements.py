@@ -1,9 +1,5 @@
-import copy
-from typing import Union, List, Tuple
-from ExpressionTree import Node
-from MObject import Function, Set, Quantor
-from Statement import Relation, Statement, LogicalOperation, MetaObject, Bool
-from Definitions import definitions
+from typing import List, Tuple
+from Statement import Statement, LogicalOperation, MetaObject, Bool
 from Knuth_Bendix_Algorithm import knuth_bendix_algorithm, kbo_compare, simplify_statement_on_system, simplify_fully
 
 # Must be refactored after expression tree change
@@ -60,7 +56,7 @@ a = Statement(MetaObject(Statement, name='A'))
 b = Statement(MetaObject(Statement, name='B'))
 c = Statement(MetaObject(Statement, name='C'))
 
-# NEUTRAL
+'''# NEUTRAL
 # a and true = a
 lhs = Statement(LogicalOperation.AND, a, Statement(Bool.TRUE))
 logical_axioms.append((lhs, a))
@@ -94,38 +90,48 @@ logical_axioms.append((lhs, Statement(Bool.FALSE)))
 lhs = Statement(LogicalOperation.OR, a, a.negation)
 logical_axioms.append((lhs, Statement(Bool.TRUE)))
 
-# Kommutativity a o b = b o a
-lhs = Statement(LogicalOperation.AND, a, b)
-rhs = Statement(LogicalOperation.AND, b, a)
-logical_axioms.append((lhs, rhs))
-
-lhs = Statement(LogicalOperation.OR, a, b)
-rhs = Statement(LogicalOperation.OR, b, a)
-logical_axioms.append((lhs, rhs))
-
-# Associativity (a o b) o c = a o (b o c)
-lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.AND, a, b), c)
-rhs = Statement(LogicalOperation.AND, a, Statement(LogicalOperation.AND, b, c))
-logical_axioms.append((lhs, rhs))
-
-lhs = Statement(LogicalOperation.OR, Statement(LogicalOperation.OR, a, b), c)
-rhs = Statement(LogicalOperation.OR, a, Statement(LogicalOperation.OR, b, c))
-logical_axioms.append((lhs, rhs))
-
 # Distibutivity (a or b) and c = (a and c) or (b and c)
 lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.OR, a, b), c)
 rhs = Statement(LogicalOperation.OR, Statement(LogicalOperation.AND, a, c), Statement(LogicalOperation.AND, b, c))
+logical_axioms.append((lhs, rhs))'''
+
+# AXIOMS
+# a xor false = a
+lhs = Statement(LogicalOperation.XOR, a, Statement(Bool.FALSE))
+logical_axioms.append((lhs, a))
+
+# a xor a = false
+lhs = Statement(LogicalOperation.XOR, a, a)
+logical_axioms.append((lhs, Statement(Bool.FALSE)))
+
+# a and true = a
+lhs = Statement(LogicalOperation.AND, a, Statement(Bool.TRUE))
+logical_axioms.append((lhs, a))
+
+# a and false = false
+lhs = Statement(LogicalOperation.AND, a, Statement(Bool.FALSE))
+logical_axioms.append((lhs, Statement(Bool.FALSE)))
+
+# a and a = a
+lhs = Statement(LogicalOperation.AND, a, a)
+logical_axioms.append((lhs, a))
+
+# Distibutivity (a xor b) and c = (a and c) xor (b and c)
+lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.XOR, a, b), c)
+rhs = Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, a, c), Statement(LogicalOperation.AND, b, c))
 logical_axioms.append((lhs, rhs))
 
-
-test_statement = Statement(LogicalOperation.AND, a, Statement(LogicalOperation.OR, a, b))
 
 print("KNUTH-BENDIX-SOLUTION")
 system = knuth_bendix_algorithm(logical_axioms)
 for key, value in system:
     print(f'Key: {key}, Value: {value}')
 
-print(simplify_fully(test_statement, logical_axioms))
+
+test_statement = Statement(LogicalOperation.XOR, a, Statement(LogicalOperation.XOR, a, a))
+test_statement = test_statement.canonical
+
+print(simplify_fully(test_statement, system))
 
 
 
