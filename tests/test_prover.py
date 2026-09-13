@@ -1,6 +1,6 @@
 import pytest
 from Prover import Prover
-from MObject import ElementrySet, Function, Quantor
+from MObject import Function, Quantor
 from CommonStatements import continuous, definitions
 from ExpressionTree import Node
 

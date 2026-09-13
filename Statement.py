@@ -21,6 +21,10 @@ class Relation(Enum):
     GE = '>'
     EQUAL = '='
     NEQUAL = '!='
+    IMPLIES = '=>'
+    IMPLIEDBY = '<='
+    ELEMENTOF = 'in'
+    NOTELEMENTOF = 'not in'
 
     def get_negation(self) -> Relation:
         match self:
@@ -44,6 +48,14 @@ class Relation(Enum):
                 return Relation.NEQUAL
             case Relation.NEQUAL:
                 return Relation.EQUAL
+            case Relation.IMPLIES:
+                return Relation.IMPLIEDBY
+            case Relation.IMPLIEDBY:
+                return Relation.IMPLIES
+            case Relation.ELEMENTOF:
+                return Relation.NOTELEMENTOF
+            case Relation.NOTELEMENTOF:
+                return Relation.ELEMENTOF
             case _:
                 raise ValueError(f"No negation defined for {self}")
 
@@ -351,6 +363,19 @@ class Statement:
             for res in self.child_right.simplify(match_statement, simplification):
                 yield replace(self, child_right=res)
 
+    def __call__(self, other: Statement) -> Generator[Statement]:
+        """ Tries to use the given statement to transform this or part of this statement (according to rule) """
+        replacement_list = self.get_replacement_list(other)
+        if _replacement_list_valid(replacement_list):
+            yield other.replace_with_list(replacement_list)
+
+        if self.child_left:
+            for res in self.child_left(other):
+                yield res
+
+        if self.child_right:
+            for res in self.child_right(other):
+                yield res
 
 
 @dataclass(frozen=True, eq=False)

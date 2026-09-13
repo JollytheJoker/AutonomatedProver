@@ -98,6 +98,14 @@ class Function(Object):
         """ Tuple of the objects abstract representation (type, binding_quantity, quantor, id). """
         return type(self), self.binding_quantity, self.quantor, self.obj_id
 
+    @cached_property
+    def input_set(self) -> Set:
+        return self.binding_quantity[0]
+
+    @cached_property
+    def output_set(self) -> Set:
+        return self.binding_quantity[1]
+
     def __repr__(self):
         return f'(F, {self.binding_quantity}, {self.quantor}, {self.obj_id})'
 

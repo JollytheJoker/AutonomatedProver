@@ -1,50 +1,12 @@
+from dataclasses import replace
 from typing import List, Tuple
-from Statement import Statement, LogicalOperation, MetaObject, Bool
+from xml.dom.pulldom import START_ELEMENT
+
+from ExpressionTree import Node
+from MObject import Set, Function, Quantor
+from Statement import Statement, LogicalOperation, MetaObject, Bool, Relation
 from Knuth_Bendix_Algorithm import knuth_bendix_algorithm, kbo_compare, simplify_statement_on_system, simplify_fully
 
-# Must be refactored after expression tree change
-'''def _attach_at_leaf(root_node: Node, new_child: Node) -> Node:
-    """ Puts the new_child at the most inner node if there is always at most 1 child"""
-    copied_root = copy.deepcopy(root_node)
-    current = copied_root
-    while current.child_nodes:
-        if len(current.child_nodes) > 1:
-            raise ValueError("Can at most have one parameter for continuity")
-        current = current.child_nodes[0][-1][0]
-    current.child_nodes = [[(new_child, 1)]]
-    return copied_root
-
-
-def ball_func(on_set: Union[ElementrySet, Set, PowerSet, FunctionSet]):
-    """ A ball function for a given set """
-    # Check if this ball function was added to definitions
-    if f'B_{"{"}{str(on_set.association)}{"}"}' in definitions.keys():
-        return definitions[f'B_{"{"}{str(on_set.association)}{"}"}']
-    else:
-        definitions[f'B_{"{"}{str(on_set.association)}{"}"}'] = Function(quantor=Quantor.DEFINE, binding_quantity=(Set(quantor=Quantor.FORALL, binding_quantity=(FunctionSet(quantor=Quantor.FORALL, binding_quantity=(on_set, on_set)), definitions["reels"], on_set)), PowerSet(quantor=Quantor.FORALL, binding_quantity=(on_set, ))), association=f'B_{"{"}{str(on_set.association)}{"}"}')
-    return definitions[f'B_{"{"}{str(on_set.association)}{"}"}']
-
-
-def continuous(func: Function | Node, metr_input: Function, metr_output: Function):
-    """ Returns a statement such that the node is continuous """
-    if isinstance(func, Function):
-        func = Node(func)
-    in_set = metr_input.binding_quantity[0]
-    out_set = metr_output.binding_quantity[0]
-    B_in = ball_func(in_set)
-    B_out = ball_func(out_set)
-    epsilon = Variable(quantor=Quantor.FORALL, binding_quantity=(definitions['reels'],))
-    delta = Variable(quantor=Quantor.EXISTS, binding_quantity=(definitions['reels'],))
-    point = Variable(quantor=Quantor.FORALL, binding_quantity=(in_set, ))
-
-    # We want to put the point as a parameter for the most inner function
-
-    ball_node = Node(B_in, child_nodes=[[(Node(metr_input), 1)], [(Node(delta), 1)], [(Node(point), 1)]])
-    continuity_left = _attach_at_leaf(func, ball_node)
-
-    inner_application = _attach_at_leaf(func, Node(point))
-    continuity_right = Node(B_out, child_nodes=[[(Node(metr_output), 1)], [(Node(epsilon), 1)], [(inner_application, 1)]])
-    return Statement(continuity_left, continuity_right, Relation.SUBSET)'''
 
 # ---------------------- BASIC AXIOMS ----------------------
 
@@ -55,45 +17,6 @@ logical_axioms: List[Tuple[Statement, Statement]] = []
 a = Statement(MetaObject(Statement, name='A'))
 b = Statement(MetaObject(Statement, name='B'))
 c = Statement(MetaObject(Statement, name='C'))
-
-'''# NEUTRAL
-# a and true = a
-lhs = Statement(LogicalOperation.AND, a, Statement(Bool.TRUE))
-logical_axioms.append((lhs, a))
-
-# a or false = a
-lhs = Statement(LogicalOperation.OR, a, Statement(Bool.FALSE))
-logical_axioms.append((lhs, a))
-
-# a and false = false
-lhs = Statement(LogicalOperation.AND, a, Statement(Bool.FALSE))
-logical_axioms.append((lhs, Statement(Bool.FALSE)))
-
-# a or true = true
-lhs = Statement(LogicalOperation.OR, a, Statement(Bool.TRUE))
-logical_axioms.append((lhs, Statement(Bool.TRUE)))
-
-# DUPLICATES
-# a o a = a
-lhs = Statement(LogicalOperation.AND, a, a)
-logical_axioms.append((lhs, a))
-
-lhs = Statement(LogicalOperation.OR, a, a)
-logical_axioms.append((lhs, a))
-
-# COMPLEMENT
-# a and not a = false
-lhs = Statement(LogicalOperation.AND, a, a.negation)
-logical_axioms.append((lhs, Statement(Bool.FALSE)))
-
-# a or not a = true
-lhs = Statement(LogicalOperation.OR, a, a.negation)
-logical_axioms.append((lhs, Statement(Bool.TRUE)))
-
-# Distibutivity (a or b) and c = (a and c) or (b and c)
-lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.OR, a, b), c)
-rhs = Statement(LogicalOperation.OR, Statement(LogicalOperation.AND, a, c), Statement(LogicalOperation.AND, b, c))
-logical_axioms.append((lhs, rhs))'''
 
 # AXIOMS
 # a xor false = a
@@ -122,7 +45,7 @@ rhs = Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, a, c), Sta
 logical_axioms.append((lhs, rhs))
 
 
-print("KNUTH-BENDIX-SOLUTION")
+'''print("KNUTH-BENDIX-SOLUTION")
 system = knuth_bendix_algorithm(logical_axioms)
 for key, value in system:
     print(f'Key: {key}, Value: {value}')
@@ -131,30 +54,70 @@ for key, value in system:
 test_statement = Statement(LogicalOperation.XOR, a, Statement(LogicalOperation.XOR, a, a))
 test_statement = test_statement.canonical
 
-print(simplify_fully(test_statement, system))
+print(simplify_fully(test_statement, system))'''
 
-
-
-'''print(lhs)
-print(logical_axioms[-3][1], logical_axioms[-3][0])
-
-s1 = Statement(LogicalOperation.AND, a, b)
-s2 = Statement(LogicalOperation.AND, b, a)
-print(kbo_compare(s1, s2))
-print(kbo_compare(s2, s1))
-
-print(next(lhs.simplify(logical_axioms[-3][1], logical_axioms[-3][0])))'''
-
-'''breakpoint()
-print(next(logical_axioms[-5][0].simplify(logical_axioms[-3][0], logical_axioms[-3][1])))'''
 
 
 # TODO: implement ZFC
 
 
 
-# INGEGER DEFINITIONS AND OPERATIONS
+# TODO: INGEGER DEFINITIONS AND OPERATIONS
+
+# ---------------------- SET & FUNCTIONAL DEFINITIONS ----------------------
+def inverse(f: Function) -> Tuple[Function, Statement]:
+    """ Returns an instance of an inverse function and the statement that makes the function the functions inverse """
+    in_set = f.input_set
+    out_set = f.output_set
+
+    f_inv = replace(f, binding_quantity=(out_set, in_set))
+    in_el = Set((in_set,), Quantor.FORALL, '', 0)
+    out_el = Set((out_set,), Quantor.FORALL, '', 0)
+
+    f_node = Node(f)
+    f_inv_node = Node(f_inv)
+    in_el_node = Node(in_el)
+    out_el_node = Node(out_el)
+
+    # f^-1(f(x)) = x
+    A = Statement(Relation.EQUAL, Statement(f_inv_node(f_node(in_el_node))), Statement(in_el_node))
+
+    # f(f^-1(y)) = y
+    B = Statement(Relation.EQUAL, Statement(f_node(f_inv_node(out_el_node))), Statement(out_el_node))
+
+    return f_inv, Statement(LogicalOperation.AND, A, B)
+
+# ---------------------- TOPOLOGICAL DEFINITIONS ----------------------
+def topolgy(X: Set) -> Set:
+    """ Returns a topology set tau for this statement X """
+    if not isinstance(X, Set):
+        raise TypeError('X is not a set')
+
+    if X.nested_depth == 0:
+        raise Exception('X is not true set (most likely variable)')
+
+    return replace(X, nested_depth=X.nested_depth + 1)
+
+def _is_topology(X: Set, tau: Set) -> bool:
+    """ Checks if tau could be topology of X (equivalent to nested depth of tau is X's + 1) """
+    if tau.binding_quantity == X.binding_quantity:
+        return tau.nested_depth == X.nested_depth + 1
+
+    return tau.binding_quantity == (X,) and tau.nested_depth == 1
+
+def continuous(f: Function, topology_in: Set, topology_out: Set) -> Statement:
+    """ Returns the statement that a function f is continous """
+    f_inv, inv_statement = inverse(f)
+
+    U = Set((f.output_set,), Quantor.FORALL)
+
+    # U open
+    u_in = Statement(Relation.ELEMENTOF, Statement(Node(U)), Statement(Node(topology_out)))
+    # f^-1(U) open
+    f_in = Statement(Relation.ELEMENTOF, Statement(Node(f_inv)(Node(U))), Statement(Node(topology_in)))
+
+    return Statement(Relation.IMPLIES, u_in, f_in)
 
 
-
-
+# UNORDERED TUPLES FOR DEFINITION UNFOLDING
+DEFINITIONS: List[Tuple[Statement | Statement]] = []
