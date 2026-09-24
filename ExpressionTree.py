@@ -256,10 +256,22 @@ class Node:
     argument_slots: Tuple[ArgumentSlot, ...] = field(default_factory=tuple)
 
     @cached_property
-    def node_object(self):
+    def node_object(self) -> Object:
         """ Recursively build up the node tuple using the function at the node """
         if not self.argument_slots:
             return self.math_object
+
+        # Test if any child_node is of type function
+        if any(isinstance(arg_slot.edge_sequence[-1].to_node.node_object, Function) for arg_slot in self.argument_slots):
+            functional_replacement: List = [None] * len(self.argument_slots)
+            for i, arg_slot in enumerate(self.argument_slots):
+                if isinstance(arg_slot.edge_sequence[-1].to_node.node_object, Function):
+                    functional_replacement[i] = arg_slot.edge_sequence[-1].to_node.node_object.binding_quantity[0]
+
+            # Replace inputs that are function with according input
+            node_object_binding_tuple = Set(tuple(new_entry if new_entry else self.math_object.binding_quantity[0].binding_quantity[i] for i, new_entry in enumerate(functional_replacement)), nested_depth=1)
+
+            return replace(self.math_object, binding_quantity=(node_object_binding_tuple, self.math_object.binding_quantity[1]), association='')
 
         # Combination of quantors in slots
         quantor = Quantor.EXISTS if any(argument_slots.quantor == Quantor.EXISTS or argument_slots.quantor == Quantor.DEFINE for argument_slots in self.argument_slots) else Quantor.FORALL
@@ -317,9 +329,10 @@ class Node:
             elif isinstance(arg, Node):
                 # If arg is a node, we add it as a direct argument of the function
                 if not arg.math_object.binding_quantity:
-                    arg_binding = (arg.math_object, )
+                    arg_binding = (arg.node_object, )
                 else:
-                    arg_binding = arg.math_object.binding_quantity
+                    arg_binding = arg.node_object.binding_quantity
+
                 if not binding.binding_quantity:
                     binding_quantity = (binding, )
                 else:
@@ -337,7 +350,7 @@ class Node:
 
     def __str__(self) -> str:
         if self.argument_slots:
-            res = f'{self.math_object}('
+            res = f'{str(self.math_object)}('
 
             for arg_slot in self.argument_slots:
                 # Since this is an argument for validity of the argument slot edges have to be cyclical if there is a next edge (except an infinite case)
@@ -361,11 +374,11 @@ class Node:
                         to_node = arg_slot.edge_sequence[0].to_node
                         if to_node is self:
                             res += '..., '
-                        res += str(arg_slot) + ', '
+                        res += str(to_node) + ', '
 
-                res += ', '
             return res[:-2] + ')'
-        return f'{self.math_object}'
+
+        return f'{str(self.math_object)}'
 
     def __hash__(self):
         return hash(tuple([hash(self.math_object)] + [hash(arg_slot) for arg_slot in self.argument_slots]))
@@ -374,17 +387,23 @@ class Node:
         """ General comparison function for given comparator (such as == or id_less_eq) """
         if self is other:
             return True
+
         if self.math_object != other.math_object:
             return False
+
         if len(self.argument_slots) != len(other.argument_slots):
             return False
+
         for self_slot, other_slot in zip(self.argument_slots, other.argument_slots):
             if not comparison_function(self_slot, other_slot):
                 return False
+
         return True
 
     def __eq__(self, other: Node) -> bool:
         """ Strict equality check in every single attribute """
+        if not isinstance(other, Node):
+            return False
         return self.compare(other, eq)
 
     def id_less_eq(self, other: Node) -> bool:
@@ -816,7 +835,7 @@ def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union
     un_shifted_cycle2 = _get_cycle_nodes(edge2.parent_node) #, edge2.cycle_length)
     cycle1 = un_shifted_cycle1[state1.shift:] + un_shifted_cycle1[:state1.shift]
     cycle2 = un_shifted_cycle2[state2.shift:] + un_shifted_cycle2[:state2.shift]
-    #breakpoint()
+
     if not _lcm_phase_reduction_valid(cycle1, cycle2, comparison_func):
         return cycle1[0], cycle2[0], False
 
@@ -863,4 +882,34 @@ def cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union
         return None, None, False
 
     return None, None, True
+
+def get_unequal_parts_cmr_reduced(expression1: Node, expression2: Node, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> Union[Tuple[None, None, bool], Tuple[Node, Node, bool]]:
+    """ This function not only returns if two obejcts are equal, but also to what point equality holds. E.g. f(x) != f(y), but f = f => (x, y) """
+    if expression1 is expression2:
+        return None, None, True
+
+    if expression1.math_object != expression2.math_object:
+        return expression1, expression2, False
+
+    if len(expression1.argument_slots) != len(expression2.argument_slots):
+        return expression1, expression2, False
+
+    for slot1, slot2 in zip(expression1.argument_slots, expression2.argument_slots):
+        # Direct filtering
+        if slot1 is slot2:
+            continue
+        if not slot1.edge_sequence and not slot2.edge_sequence:
+            continue
+
+        if (slot1.edge_sequence and not slot2.edge_sequence) or (not slot1.edge_sequence and slot2.edge_sequence):
+            return expression1, expression2, False
+
+        # Cylic modulo reduction
+        state_self = CycleState(edge_sequence=list(slot1.edge_sequence))
+        state_other = CycleState(edge_sequence=list(slot2.edge_sequence))
+
+        return cmr(state_self, state_other, comparison_func)
+
+    return None, None, True
+
 

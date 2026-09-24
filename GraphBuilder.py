@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Union, Tuple, List
 
@@ -76,6 +77,9 @@ class GraphBuilder:
         self._nodes.append(node)
         return node
 
+    def add_slot_to_node(self, node: _NodeBuilder, desired_output):
+        node.argument_slots = (_ArgumentSlotBuilder(node, desired_output, []), )
+
     @staticmethod
     def add_edge_to_slot(
         node: _NodeBuilder,
@@ -119,7 +123,7 @@ class GraphBuilder:
         """
         self._root_node = root_node
 
-    def build(self):
+    def build(self) -> Node:
         """
         Builds the graph independently of node creation order.
 
@@ -206,3 +210,56 @@ class GraphBuilder:
             raise NotImplementedError("Root node not set")
 
         return final_nodes[self._root_node]
+
+    def get_root_node(self) -> _NodeBuilder:
+        return self._root_node
+
+def get_builder(root: Node) -> GraphBuilder:
+    """ Returns a graph builder object from a given node. """
+    builder = GraphBuilder()
+
+    # Discover all nodes
+    nodes: list[Node] = []
+    visited: set[int] = set()
+    queue = deque([root])
+
+    while queue:
+        node = queue.popleft()
+
+        if id(node) in visited:
+            continue
+
+        visited.add(id(node))
+        nodes.append(node)
+
+        for arg_slot in node.argument_slots:
+            for edge in arg_slot.edge_sequence:
+                queue.append(edge.to_node)
+
+                if isinstance(edge.weight, Node):
+                    queue.append(edge.weight)
+
+    # Create all builder nodes
+    node_map: dict[int, _NodeBuilder] = {}
+
+    for node in nodes:
+        node_map[id(node)] = builder.add_node(node.math_object, len(node.argument_slots), *(argument_slot.desired_output for argument_slot in node.argument_slots))
+
+    # Recreate edges
+    for node in nodes:
+        builder_node = node_map[id(node)]
+
+        for slot_idx, arg_slot in enumerate(node.argument_slots):
+            for edge in arg_slot.edge_sequence:
+                new_to_node = node_map[id(edge.to_node)]
+
+                if isinstance(edge.weight, Node):
+                    new_weight = node_map[id(edge.weight)]
+                else:
+                    new_weight = edge.weight
+
+                new_edge = builder.add_edge(to_node=new_to_node, weight=new_weight, from_node=builder_node)
+                builder.add_edge_to_slot(builder_node, new_edge, slot_idx)
+
+    builder.set_root_node(node_map[id(root)])
+    return builder

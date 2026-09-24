@@ -48,6 +48,7 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
             for p1, p2 in extention:
                 p1 = simplify_fully(p1, temporary_res)
                 p2 = simplify_fully(p2, temporary_res)
+
                 # Only add if the statements in reduced form are unequal
                 if p1 != p2 and (p1, p2) not in processing:
                     critical_pairs.append((p1, p2))
@@ -109,6 +110,31 @@ def simplify_fully(s: Statement, system: List[Tuple[Statement, Statement]]):
     while (s_new := simplify_statement_on_system(s_old, system)) != s_old:
         s_old = s_new
     return s_old
+
+
+def reducde_statement_modulo_directed_axioms(statement: Statement, system: List[Tuple[Statement, Statement]]):
+    s_old = statement
+    s_new = statement
+    for (s, t) in system:
+        # Since a system is conflouent we can just take the next simplification
+        try:
+            s_new = next(s_new.simplify(s, t))
+        except StopIteration:
+            pass
+
+    while s_new != s_old:
+        s_old = s_new
+
+        for (s, t) in system:
+            # Since a system is conflouent we can just take the next simplification
+            try:
+                s_new = next(s_new.simplify(s, t))
+            except StopIteration:
+                pass
+
+    return s_new
+
+
 
 
 
