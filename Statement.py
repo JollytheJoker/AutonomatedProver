@@ -21,8 +21,6 @@ class Relation(Enum):
     GE = '>'
     EQUAL = '='
     NEQUAL = '!='
-    IMPLIES = '=>'
-    IMPLIEDBY = '<='
     ELEMENTOF = 'in'
     NOTELEMENTOF = 'not in'
 
@@ -48,10 +46,6 @@ class Relation(Enum):
                 return Relation.NEQUAL
             case Relation.NEQUAL:
                 return Relation.EQUAL
-            case Relation.IMPLIES:
-                return Relation.IMPLIEDBY
-            case Relation.IMPLIEDBY:
-                return Relation.IMPLIES
             case Relation.ELEMENTOF:
                 return Relation.NOTELEMENTOF
             case Relation.NOTELEMENTOF:
@@ -70,6 +64,8 @@ class LogicalOperation(Enum):
     XNOR = 'xnor'
     EQUAL = '='
     NEQUAL = '!='
+    IMPLIES = '=>'
+    IMPLIEDBY = '<='
 
     def get_negation(self) -> LogicalOperation:
         match self:
@@ -85,6 +81,10 @@ class LogicalOperation(Enum):
                 return LogicalOperation.XNOR
             case LogicalOperation.XNOR:
                 return LogicalOperation.XOR
+            case LogicalOperation.IMPLIES:
+                return LogicalOperation.IMPLIEDBY
+            case LogicalOperation.IMPLIEDBY:
+                return LogicalOperation.IMPLIES
             case _:
                 raise ValueError(f"No negation defined for {self}")
 
@@ -105,6 +105,10 @@ class LogicalOperation(Enum):
             return '⊕'
         if self is LogicalOperation.XNOR:
             return '⊙'
+        if self is LogicalOperation.IMPLIES:
+            return '=>'
+        if self is LogicalOperation.IMPLIEDBY:
+            return '<='
         return 'is not'
 
 class Bool(Enum):
@@ -232,11 +236,7 @@ class Statement:
             return replace(self, node_function=self.node_function.get_negation(), child_left=self.child_left, child_right=self.child_right)
 
         if isinstance(self.node_function, Relation):
-            try:
-                return replace(self, node_function=self.node_function.get_negation())
-            except ValueError:
-                # Need to negate quantors
-                return replace(self, child_left=self.child_left.negation, child_right=self.child_right.negation)
+            return replace(self, node_function=self.node_function.get_negation())
 
         if isinstance(self.node_function, Node) or isinstance(self.node_function, MetaObject):
             return replace(self, node_function=self.node_function.negation)
@@ -280,6 +280,9 @@ class Statement:
 
     def primitive_eq(self, other: Statement) -> bool:
         """ Checks for quantative equivalence of two statements """
+        if isinstance(other.node_function, MetaObject):
+            return other.node_function.obj_type == Statement
+
         if isinstance(self.node_function, Node) and not _is_of_type(other.node_function, Node):
             return False
 
@@ -287,9 +290,13 @@ class Statement:
             return False
 
         elif isinstance(self.node_function, MetaObject):
+            # Special case
+            if self.node_function.obj_type == Statement:
+                return True
+
             if not _is_of_type(self.node_function, type(other.node_function)):
                 return False
-            # If other also is meta object and has same name, negation status can't be different
+            # If other also is metaobject and has the same name, negation status can't be different
             if isinstance(other.node_function, MetaObject):
                 if self.node_function.name == other.node_function.name and not self.node_function.negated == other.node_function.negated:
                     return False
@@ -317,8 +324,8 @@ class Statement:
 
         # TODO: Requires more depth for node replacement!!!
         if _eq_node_function(self.node_function, other.node_function):
-            # If both are leave-nodes even if they are same we need to add them to unification process
-            if self.is_leave_node and other.is_leave_node:
+            # If both are leave-nodes, even if they are same we need to add them to unification process
+            if self.is_leave_node and other.is_leave_node and self is not other:
                 replacement_list.append((other, self))
 
             # TODO: What if other has child_nodes?
@@ -326,10 +333,23 @@ class Statement:
                 replacement_list = self.child_left.get_replacement_list(other.child_left, replacement_list)
             if self.child_right:
                 replacement_list = self.child_right.get_replacement_list(other.child_right, replacement_list)
-        else:
+        elif self is not other:
             replacement_list.append((other, self))
 
         return replacement_list
+
+    def get_replacement_lists_recc(self, other: Statement) -> Generator[List[Tuple[Statement, Statement]]]:
+        """ Runs the get_replacement_list function reccursively through tree structure """
+        if self.primitive_eq(other):
+            yield self.get_replacement_list(other)
+
+        if isinstance(self.child_left, Statement):
+            for res in self.child_left.get_replacement_lists_recc(other):
+                yield res
+
+        if isinstance(self.child_right, Statement):
+            for res in self.child_right.get_replacement_lists_recc(other):
+                yield res
 
     def replace_with_list(self, replacement_list: List[Tuple[Statement, Statement]]) -> Statement:
         """ Replaces this statement's AST parts that are equivalent to any first-tuple-value in the replacement dict """
@@ -348,34 +368,32 @@ class Statement:
 
         return replace(self, node_function=self.node_function, child_left=new_left, child_right=new_right)
 
+    def _static_simplify(self, match_statement: Statement, simplification: Statement) -> Union[Statement]:
+        """ Replaces all the parts of self that exactly match the match_statement with simplification """
+        if self == match_statement:
+            return simplification
+
+        if self.child_left is not None:
+            new_left = self.child_left._static_simplify(match_statement, simplification)
+        else:
+            new_left = self.child_left
+
+        if self.child_right is not None:
+            new_right = self.child_right._static_simplify(match_statement, simplification)
+        else:
+            new_right = self.child_right
+
+        return replace(self, child_left=new_left, child_right=new_right)
+
     def simplify(self, match_statement: Statement, simplification: Statement) -> Generator[Statement]:
-        """ Checks ats from this node for match_statement structure. If enherits match_statement structure, we will replace it with the simplifaction accordingly """
-        if self.primitive_eq(match_statement):
-            replacement_list = self.get_replacement_list(match_statement)
-            if _replacement_list_valid(replacement_list):
-                yield simplification.replace_with_list(replacement_list)
+        """ Checks ats from this node for match_statement structure. If enherits match_statement structure, we will replace it with the simplifaction accordingly (under preservation of the replacement list) """
+        for replacement_list in self.get_replacement_lists_recc(match_statement):
+            new_self = self.replace_with_list(replacement_list)
+            new_match = match_statement.replace_with_list(replacement_list)
+            new_simplification = simplification.replace_with_list(replacement_list)
 
-        if isinstance(self.child_left, Statement):
-            for res in self.child_left.simplify(match_statement, simplification):
-                yield replace(self, child_left=res)
-
-        if isinstance(self.child_right, Statement):
-            for res in self.child_right.simplify(match_statement, simplification):
-                yield replace(self, child_right=res)
-
-    def __call__(self, other: Statement) -> Generator[Statement]:
-        """ Tries to use the given statement to transform this or part of this statement (according to rule) """
-        replacement_list = self.get_replacement_list(other)
-        if _replacement_list_valid(replacement_list):
-            yield other.replace_with_list(replacement_list)
-
-        if self.child_left:
-            for res in self.child_left(other):
-                yield res
-
-        if self.child_right:
-            for res in self.child_right(other):
-                yield res
+            # Replace match_statement with simplification
+            yield new_self._static_simplify(new_match, new_simplification)
 
 
 @dataclass(frozen=True, eq=False)
@@ -592,6 +610,7 @@ def replace_statement_with_other(statement1: Statement, statement2: Statement) -
 def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) -> bool:
     """ Checks if any key is used twice with different values """
     # TODO: Can we update to only id search to increase runtime from O(n^2) to O(n)?
+    # TODO: On already seen replacements (A, B) & (A, C), try to find replacement (B, C) or (C, B)
     seen = []
 
     for key, value in replacement_lst:

@@ -256,10 +256,22 @@ class Node:
     argument_slots: Tuple[ArgumentSlot, ...] = field(default_factory=tuple)
 
     @cached_property
-    def node_object(self):
+    def node_object(self) -> Object:
         """ Recursively build up the node tuple using the function at the node """
         if not self.argument_slots:
             return self.math_object
+
+        # Test if any child_node is of type function
+        if any(isinstance(arg_slot.edge_sequence[-1].to_node.node_object, Function) for arg_slot in self.argument_slots):
+            functional_replacement: List = [None] * len(self.argument_slots)
+            for i, arg_slot in enumerate(self.argument_slots):
+                if isinstance(arg_slot.edge_sequence[-1].to_node.node_object, Function):
+                    functional_replacement[i] = arg_slot.edge_sequence[-1].to_node.node_object.binding_quantity[0]
+
+            # Replace inputs that are function with according input
+            node_object_binding_tuple = Set(tuple(new_entry if new_entry else self.math_object.binding_quantity[0].binding_quantity[i] for i, new_entry in enumerate(functional_replacement)), nested_depth=1)
+
+            return replace(self.math_object, binding_quantity=(node_object_binding_tuple, self.math_object.binding_quantity[1]), association='')
 
         # Combination of quantors in slots
         quantor = Quantor.EXISTS if any(argument_slots.quantor == Quantor.EXISTS or argument_slots.quantor == Quantor.DEFINE for argument_slots in self.argument_slots) else Quantor.FORALL
@@ -317,9 +329,10 @@ class Node:
             elif isinstance(arg, Node):
                 # If arg is a node, we add it as a direct argument of the function
                 if not arg.math_object.binding_quantity:
-                    arg_binding = (arg.math_object, )
+                    arg_binding = (arg.node_object, )
                 else:
-                    arg_binding = arg.math_object.binding_quantity
+                    arg_binding = arg.node_object.binding_quantity
+
                 if not binding.binding_quantity:
                     binding_quantity = (binding, )
                 else:
@@ -337,7 +350,7 @@ class Node:
 
     def __str__(self) -> str:
         if self.argument_slots:
-            res = f'{self.math_object}('
+            res = f'{str(self.math_object)}('
 
             for arg_slot in self.argument_slots:
                 # Since this is an argument for validity of the argument slot edges have to be cyclical if there is a next edge (except an infinite case)
@@ -361,11 +374,11 @@ class Node:
                         to_node = arg_slot.edge_sequence[0].to_node
                         if to_node is self:
                             res += '..., '
-                        res += str(arg_slot) + ', '
+                        res += str(to_node) + ', '
 
-                res += ', '
             return res[:-2] + ')'
-        return f'{self.math_object}'
+
+        return f'{str(self.math_object)}'
 
     def __hash__(self):
         return hash(tuple([hash(self.math_object)] + [hash(arg_slot) for arg_slot in self.argument_slots]))
@@ -385,6 +398,8 @@ class Node:
 
     def __eq__(self, other: Node) -> bool:
         """ Strict equality check in every single attribute """
+        if not isinstance(other, Node):
+            return False
         return self.compare(other, eq)
 
     def id_less_eq(self, other: Node) -> bool:

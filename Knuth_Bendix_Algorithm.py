@@ -48,13 +48,20 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
             for p1, p2 in extention:
                 p1 = simplify_fully(p1, temporary_res)
                 p2 = simplify_fully(p2, temporary_res)
+
                 # Only add if the statements in reduced form are unequal
                 if p1 != p2 and (p1, p2) not in processing:
+                    print("Critical pair found: ", p1, p2)
+                    print(f"{s}, {t} \n")
                     critical_pairs.append((p1, p2))
                     processing.add((p1, p2))
 
             axiom_system.extend(critical_pairs)
 
+    for val, key in temporary_res:
+        print(val, '->', key)
+
+    print()
     # Clear redudantent rules by simplifing
     final_rule_system = []
 
