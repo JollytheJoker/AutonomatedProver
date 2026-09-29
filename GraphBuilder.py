@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections import deque
 from dataclasses import dataclass
 from typing import Union, Tuple, List
@@ -205,9 +206,21 @@ class GraphBuilder:
                 )
 
         if not self._root_node:
-            # TODO: Implement search to return node that is never pointed to
-            # by any edge; infinite circles raise NotImplementedError.
-            raise NotImplementedError("Root node not set")
+            # Remove all nodes that get pointed to
+            nodes = self._nodes
+            for node in self._nodes:
+
+                for arg_slot in node.argument_slots:
+                    for edge in arg_slot.edge_sequence:
+                        try:
+                            nodes.remove(edge.to_node)
+                        except ValueError:
+                            continue
+
+            if len(nodes) != 1:
+                raise ValueError("Root node not set")
+            warnings.warn(f"Root node not set, used: {self._root_node} automatically")
+            self._root_node = nodes[0]
 
         return final_nodes[self._root_node]
 

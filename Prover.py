@@ -74,10 +74,6 @@ class Prover:
                 return (state, )
 
             for statement in list(set(self.statements) - set(state.transformations)):
-                '''if statement.node_function != self.goal_statement.node_function:
-                    # TODO: What if statement only has packed non-logical junction-function
-                    continue'''
-
                 # Update statespace
                 # Option 1: simplify state with statement
                 for new_statement in state.current_statement.simplify(statement, Statement(Bool.TRUE)):

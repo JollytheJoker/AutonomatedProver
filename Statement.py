@@ -335,21 +335,18 @@ class Statement:
         for res in other.child_right.primitive_contains(self):
             yield res
 
-    def get_replacement_list(self, other: Statement, replacement_list: Union[List[Tuple[Statement, Statement]], None] = None) -> List[Tuple[Statement, Statement]]:
+    def get_replacement_list(self, other: Statement, replacement_list: Union[List[Tuple[Statement, Statement]], None] = None) -> List[Union[Tuple[Statement, Statement], Tuple[None, None]]]:
         """ Returns the necessary replacements on this statement to make a step that is only primitvely equal completely equal """
         if replacement_list is None:
             replacement_list = []
 
-        # TODO: Requires more depth for node replacement!!!
         if _eq_node_function(self.node_function, other.node_function):
-            '''# If both are leave-nodes, even if they are same we need to add them to replacement process
-            if self.is_leave_node and other.is_leave_node and self is not other:
-                replacement_list.append(_ordered_replacement_tuple(other, self))'''
+            if (self.child_left is None) ^ (other.child_left is None) or (self.child_right is None) ^ (other.child_right is None):
+                return [(None, None)]
 
-            # TODO: What if other has child_nodes?
-            if self.child_left:
+            if self.child_left and other.child_left:
                 replacement_list = self.child_left.get_replacement_list(other.child_left, replacement_list)
-            if self.child_right:
+            if self.child_right and other.child_right:
                 replacement_list = self.child_right.get_replacement_list(other.child_right, replacement_list)
         elif self is not other:
             replacement_list.append(_ordered_replacement_tuple(other, self))
@@ -406,7 +403,8 @@ class Statement:
     def simplify(self, match_statement: Statement, simplification: Statement) -> Generator[Statement]:
         """ Checks ats from this node for match_statement structure. If enherits match_statement structure, we will replace it with the simplifaction accordingly (under preservation of the replacement list) """
         for replacement_list in self.get_replacement_lists_recc(match_statement):
-            if not _replacement_list_valid(replacement_list):
+            replacement_list, valid = _replacement_list_valid(replacement_list)
+            if not valid:
                 continue
 
             new_self = self.replace_with_list(replacement_list)
@@ -658,31 +656,76 @@ def _ordered_replacement_tuple(obj1: Statement, obj2: Statement) -> Union[Tuple[
 
     return obj2, obj1
 
-def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) -> bool:
-    """ Checks if any key is used twice with different values """
+def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) -> Tuple[List[Tuple[Statement, Statement]], bool]:
+    """ Checks if any key is used twice with different values. On already seen replacements (A, B) & (A, C), try to find replacement (B, C) or (C, B) """
     # TODO: Can we update to only id search to increase runtime from O(n^2) to O(n)?
-    # TODO: On already seen replacements (A, B) & (A, C), try to find replacement (B, C) or (C, B)
-    seen = []
+    updated_lst = []
+    updated_lst_id_pairings = set()
+
+    def add_to_updated(_key, _value):
+        if (id(_key), id(_value)) in updated_lst_id_pairings:
+            return
+        updated_lst.append((_key, _value))
+        updated_lst_id_pairings.add((id(_key), id(_value)))
+
 
     for key, value in replacement_lst:
         if not key or not value:
-            return False
+            return [], False
 
-        for old_key, old_value in seen:
-            # Special-case meta_objects
+        for old_key, old_value in updated_lst:
+            # Special-case: Can't substiture A with something and at the same time the logical negation that is unequal
             if isinstance(key.node_function, MetaObject) and isinstance(old_key.node_function, MetaObject):
                 key_node_function = key.node_function
                 old_key_node_function = old_key.node_function
                 if key_node_function == old_key_node_function.negation:
-                    if value != old_value.negation:
-                        return False
-                    break
+                    if value == old_value.negation:
+                        continue
+
+                    # Try to do another substitution A->B, not A->C (B!=not C), but B->not C (possible) => A->not C, not A -> C, B->not C
+                    value_replacement = _ordered_replacement_tuple(value, old_value.negation)
+                    if value_replacement == (None, None):
+                        return [], False
+
+                    # Update new replacement
+                    if id(value_replacement[0]) == id(value):
+                        if (id(key), id(value)) in updated_lst_id_pairings: updated_lst.remove((key, value))
+                        add_to_updated(key, value_replacement[1]) # A->not C (new)
+                        add_to_updated(*value_replacement) # B->not C (new)
+                        add_to_updated(old_key, old_value) # not A->C
+
+                    # Redo check in the other ordering
+                    value_replacement = _ordered_replacement_tuple(value.negation, old_value)
+                    if value_replacement == (None, None):
+                        return [], False
+
+                    if id(value_replacement[0]) == id(old_value):
+                        if (id(old_key), id(old_value)) in updated_lst_id_pairings: updated_lst.remove((old_key, old_value))
+                        add_to_updated(old_value, value_replacement[1])
+                        add_to_updated(*value_replacement)
+                        add_to_updated(key, value)
+
+                    return [], False
 
             if key == old_key:
-                if value != old_value:
-                    return False
-                break
-        else:
-            seen.append((key, value))
+                if value == old_value:
+                    continue
 
-    return True
+                # Again try to resolve issue A->B, A->C (B!=C), but B->C (possible) => A->C, B->C
+                value_replacement = _ordered_replacement_tuple(value, old_value)
+                if value_replacement == (None, None):
+                    return [], False
+
+                # Update with new replacement
+                add_to_updated(*value_replacement)
+                if id(value_replacement[0]) == id(value):
+                    if (id(key), id(value)) in updated_lst_id_pairings: updated_lst.remove((key, value))
+                    add_to_updated(old_key, old_value)
+                else:
+                    if (id(old_key), id(old_value)) in updated_lst_id_pairings: updated_lst.remove((old_key, old_value))
+                    add_to_updated(key, value)
+
+
+        add_to_updated(key, value)
+
+    return updated_lst, True
