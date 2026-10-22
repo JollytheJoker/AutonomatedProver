@@ -755,41 +755,77 @@ def _evaluate_node(node: Union[int, float, Node], n: int) -> int:
     raise NotImplementedError("No evaluation implemented yet")
 
 
-def _same_cycle_chain(cycle1: List[Node], cycle2: List[Node], comparison_func: Callable) -> bool:
+def _compare_pairing(node1: Node, node2: Node, cycle1_node_ids: Set[int], cycle2_node_ids: Set[int], comparison_func: Callable) -> bool:
     """
-    Checks if two given cycles are the same.
-    Function hearby assumes that both lists are of the same length and the last element is the same.
-    To prevent reccursion calls in __eq__ methode next_sequence nodes aren't processed when child_nodes.
+    Checks if two given nodes from two cycles are the same under a comparison function.
+    To prevent recursive calls on the comparison function (due to cycles) we ignore
+    child_nodes that belong to the cycle
     """
-    for i, (self_node, other_node) in enumerate(zip(cycle1[:-1], cycle2[:-1])):
-        if len(self_node.argument_slots) != len(other_node.argument_slots):
+    if len(node1.argument_slots) != len(node2.argument_slots):
+        return False
+
+    for node1_argument_slot, node2_argument_slot in zip(node1.argument_slots, node2.argument_slots):
+        if any(node_id in cycle1_node_ids for node_id in node1_argument_slot.get_pointed_ids) or any(node_id in cycle2_node_ids for node_id in node2_argument_slot.get_pointed_ids):
+            # Don't check child nodes in currently checked cycle to prevent recursion errors
+            continue
+
+        if not comparison_func(node1_argument_slot, node2_argument_slot):
             return False
-
-        next_node_self = cycle1[i + 1]
-        next_node_other = cycle2[i + 1]
-
-        for self_argument_slot, other_argument_slot in zip(self_node.argument_slots, other_node.argument_slots):
-            if id(next_node_self) in self_argument_slot.get_pointed_ids or id(next_node_other) in other_argument_slot.get_pointed_ids:
-                # Don't check child nodes in currently checked cycle to stop reccursion errors
-                continue
-            if not comparison_func(self_argument_slot, other_argument_slot):
-                return False
     return True
+
 
 def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node], comparison_func: Callable) -> bool:
-    """ Helper function to check if two given cycles are the same using lcm reduction """
+    """
+    Helper function to check if two given cycles are the same using the following algorithm:
+    Given two cycles of length a, b lcm reduction checks for [0, 1] & [0', 1', 2']:
+    (0 == 0'), (1 == 1'), (0 == 2'), (1 == 0'), (0 == 1'), (1 == 2') => 6 checks
+    However there are unnecessary checks: If we know that 0 == 1, then we only need to check
+    0 to all [0', 1', 2']. This is in total only 4 checks. In total, we reduce the checks from
+    lcm(a, b) to a + b - gcd(a, b)
+    """
+    # TODO: Cycle length might be variable
     cycle1_length = len(cycle1)
     cycle2_length = len(cycle2)
-    try:
-        lcm = math.lcm(cycle1_length, cycle2_length)
-    except ValueError:
-        raise NotImplementedError("Comparisons of variable length edges is not yet supported")
 
-    lcm_cycle_self = cycle1 * int(lcm / cycle1_length)
-    lcm_cycle_other = cycle2 * int(lcm / cycle2_length)
-    if not _same_cycle_chain(lcm_cycle_self, lcm_cycle_other, comparison_func):
+    if cycle1_length == 0 or cycle2_length == 0:
         return False
-    return True
+
+    gcd = math.gcd(cycle1_length, cycle2_length)
+
+    groups = [[] for _ in range(gcd)]
+    for i in range(cycle1_length):
+        groups[i % gcd].append(i)
+
+    pairings = []
+    for group in groups:
+        if not group:
+            continue
+
+        representative = group[0]
+        indices = list({(representative + cycle1_length * k) % cycle2_length for k in range(cycle2_length // gcd)})
+
+        # Cycle1 pairings
+        old_node1 = cycle1[representative]
+        for i in group[0:]:
+            new_node1 = cycle1[i]
+            pairings.append((old_node1, new_node1))
+            old_node1 = new_node1
+
+        # Cycle2 pairings:
+        old_node2 = cycle2[indices[0]]
+        for i in indices[0:]:
+            new_node2 = cycle2[i]
+            pairings.append((old_node2, new_node2))
+            old_node2 = new_node2
+
+        # Intersectional pairing
+        pairings.append((old_node1, old_node2))
+
+    # Compare pairings
+    cycle1_ids = {id(node) for node in cycle1}
+    cycle2_ids = {id(node) for node in cycle2}
+    return not any(not _compare_pairing(node1, node2, cycle1_ids, cycle2_ids, comparison_func) for node1, node2 in pairings)
+
 
 # CMR
 def _boolean_cmr(state1: CycleState, state2: CycleState, comparison_func: Callable[[Union[Node, ArgumentSlot, Edge, Object], Union[Node, ArgumentSlot, Edge, Object]], bool]) -> bool:

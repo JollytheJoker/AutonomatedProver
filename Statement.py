@@ -61,11 +61,11 @@ class LogicalOperation(Enum):
     AND = 'and'
     OR = 'or'
     XOR = 'xor'
-    XNOR = 'xnor'
     EQUAL = '='
     NEQUAL = '!='
     IMPLIES = '=>'
     IMPLIEDBY = '<='
+    DOUBLEARROW = '<=>'
 
     def get_negation(self) -> LogicalOperation:
         match self:
@@ -78,19 +78,19 @@ class LogicalOperation(Enum):
             case LogicalOperation.NEQUAL:
                 return LogicalOperation.EQUAL
             case LogicalOperation.XOR:
-                return LogicalOperation.XNOR
-            case LogicalOperation.XNOR:
-                return LogicalOperation.XOR
+                return LogicalOperation.DOUBLEARROW
             case LogicalOperation.IMPLIES:
                 return LogicalOperation.IMPLIEDBY
             case LogicalOperation.IMPLIEDBY:
                 return LogicalOperation.IMPLIES
+            case LogicalOperation.DOUBLEARROW:
+                return LogicalOperation.XOR
             case _:
                 raise ValueError(f"No negation defined for {self}")
 
     def negate_inner(self) -> bool:
         """ Returns if negating the symbol is enough or inner statements must be negated as well """
-        if self is LogicalOperation.EQUAL or self is LogicalOperation.NEQUAL:
+        if self is LogicalOperation.EQUAL or self is LogicalOperation.NEQUAL or self is LogicalOperation.DOUBLEARROW or self is LogicalOperation.XOR:
             return False
         return True
 
@@ -103,8 +103,8 @@ class LogicalOperation(Enum):
             return 'is'
         if self is LogicalOperation.XOR:
             return '⊕'
-        if self is LogicalOperation.XNOR:
-            return '⊙'
+        if self is LogicalOperation.DOUBLEARROW:
+            return '<=>'
         if self is LogicalOperation.IMPLIES:
             return '=>'
         if self is LogicalOperation.IMPLIEDBY:
@@ -196,7 +196,6 @@ class Statement:
 
         if _is_of_type(self.node_function, MetaObject) and not self.is_leave_node:
             raise Exception("MetaObject values can't have child nodes")
-
 
     def __str__(self):
         if self.is_leave_node:

@@ -10,7 +10,7 @@ from Knuth_Bendix_Algorithm import knuth_bendix_algorithm, kbo_compare, simplify
 
 # ---------------------- BASIC AXIOMS ----------------------
 
-# (\land & \lor will be refered to 'o')#
+# (\land & \lor will be referred to 'o')
 logical_axioms: List[Tuple[Statement, Statement]] = []
 
 # Define 3 placeholders
@@ -188,6 +188,7 @@ def topolgy(X: Set) -> Set:
     if not X.binding_quantity:
         return Set(binding_quantity=(X, ), nested_depth=2)
     return replace(X, nested_depth=X.nested_depth + 1)
+
 
 def _is_topology(X: Set, tau: Set) -> bool:
     """ Checks if tau could be topology of X (equivalent to nested depth of tau is X's + 1) """
