@@ -1,12 +1,11 @@
 from __future__ import annotations
 import uuid
-import warnings
 from functools import cached_property
 from typing import Union, Any, Generator, Dict, List, Tuple
 from ExpressionTree import Node, eq, get_unequal_parts_cmr_reduced
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from MObject import Function, Set
+from MObject import Function, Set, Object, Quantor
 
 
 # Standart Operations (Relations, Logical, Boolen-Values)
@@ -62,7 +61,7 @@ class LogicalOperation(Enum):
     OR = 'or'
     XOR = 'xor'
     XNOR = 'xnor'
-    EQUAL = '='
+    EQUAL = '≡'
     NEQUAL = '!='
     IMPLIES = '=>'
     IMPLIEDBY = '<='
@@ -100,7 +99,7 @@ class LogicalOperation(Enum):
         if self is LogicalOperation.OR:
             return '|'
         if self is LogicalOperation.EQUAL:
-            return 'is'
+            return '≡'
         if self is LogicalOperation.XOR:
             return '⊕'
         if self is LogicalOperation.XNOR:
@@ -156,6 +155,8 @@ class Statement:
     node_function: Union[LogicalOperation, Relation, Node, Bool, MetaObject]
     child_left: Union[Statement, None] = None
     child_right: Union[Statement, None] = None
+    definition_prefix: Tuple[Union[Object, MetaObject], ...] = field(default=())
+    higher_scope_definitions: Tuple[Union[Object, MetaObject], ...] = field(default=())
 
     def __post_init__(self):
         """
@@ -163,8 +164,17 @@ class Statement:
         If children are nodes, then node_function must be a realation.
         If the node_function is a logical operation, then child nodes can't be expression graphs
         If the node_function is an expression graph, they must be a leave node
-        Updates and adds new objects to a precedence list
+        Updates and add new objects to a precedence list
         """
+        # Canonicalize definition prefix
+        self.__dict__["definition_prefix"] = _canonicalize_prefix(self.definition_prefix)
+
+        # Update the children higher scope definitions
+        if self.child_left:
+            self.child_left._update_new_higher_scope_definitions(self.definition_prefix)
+        if self.child_right:
+            self.child_right._update_new_higher_scope_definitions(self.definition_prefix)
+
         # Update precedence
         if not isinstance(self.node_function, Node):
             add_precedence(self.node_function)
@@ -197,7 +207,6 @@ class Statement:
         if _is_of_type(self.node_function, MetaObject) and not self.is_leave_node:
             raise Exception("MetaObject values can't have child nodes")
 
-
     def __str__(self):
         if self.is_leave_node:
             return str(self.node_function)
@@ -227,6 +236,19 @@ class Statement:
         Every math object will get negated in the quantor propergting through the quantor chain
         """
         if isinstance(self.node_function, LogicalOperation):
+            # TODO: Simplify cases; implement Impliedby
+            if self.node_function is LogicalOperation.IMPLIES:
+                if self.child_left is None:
+                    new_left = None
+                else:
+                    new_left = self.child_left
+                if self.child_right is None:
+                    new_right = None
+                else:
+                    new_right = self.child_right.negation
+
+                return replace(self, node_function=LogicalOperation.AND, child_left=new_left, child_right=new_right)
+
             if self.node_function.negate_inner():
                 if self.child_left is None:
                     new_left = None
@@ -243,7 +265,7 @@ class Statement:
         if isinstance(self.node_function, Relation):
             return replace(self, node_function=self.node_function.get_negation())
 
-        if isinstance(self.node_function, Node) or isinstance(self.node_function, MetaObject):
+        if isinstance(self.node_function, Node) or isinstance(self.node_function, MetaObject) or isinstance(self.node_function, Bool):
             return replace(self, node_function=self.node_function.negation)
 
         raise Exception(f"Can't negate type {type(self.node_function)}")
@@ -272,6 +294,44 @@ class Statement:
     def canonical(self) -> Statement:
         """ Returns a canonical version of this statement """
         return canonicalize_ac(self)
+
+    @cached_property
+    def global_definition_prefix(self) -> set[Union[Object, MetaObject]]:
+        """ The global definition prefix is the union of all child definition prefixes """
+        if isinstance(self.node_function, Node):
+            return set(node.math_object for node in self.node_function.get_all_nodes() if node.math_object.quantor is not Quantor.DEFINE)
+
+        if isinstance(self.node_function, MetaObject) and not self.node_function.globaly_defined:
+            return {self.node_function}
+
+        left_global = set(self.child_left.global_definition_prefix) if self.child_left else set()
+        right_global = set(self.child_right.global_definition_prefix) if self.child_right else set()
+
+        return left_global | right_global
+
+    @cached_property
+    def scope_requiered_definitions(self) -> set[Union[Object, MetaObject]]:
+        """ Returns the objects, which at this point must be defined for coherent behavior """
+        if self.child_left and self.child_right:
+            return self.child_left.global_definition_prefix & self.child_right.global_definition_prefix
+
+        if self.child_left:
+            return self.child_left.global_definition_prefix
+
+        if self.child_right:
+            return self.child_right.global_definition_prefix
+
+        return self.global_definition_prefix
+
+    def _update_new_higher_scope_definitions(self, new_definitions: Tuple[Union[Object, MetaObject], ...]):
+        """ Update the higher scope definitions tuple to include the new defintions. Since this will only be called from even higher scoped nodes, we can append the new_definitions to the front of the tuple """
+        self.__dict__["higher_scope_definitions"] = new_definitions + self.higher_scope_definitions
+        if self.child_left: self.child_left._update_new_higher_scope_definitions(new_definitions)
+        if self.child_right: self.child_right._update_new_higher_scope_definitions(new_definitions)
+
+    def requiered_definitions_given(self) -> bool:
+        """ Checks for validity of at this scope requiered definitions and given definitions """
+        return self.scope_requiered_definitions.issubset(set(self.higher_scope_definitions) | set(self.definition_prefix))
 
     def get_leave_nodes(self) -> List[Statement]:
         """ Returns a list of all the (possilby indirect) leaves nodes """
@@ -371,6 +431,8 @@ class Statement:
         for (key, val) in replacement_list:
             if self == key:
                 return val
+            if self == key.negation:
+                return val.negation
 
         if self.child_right is not None:
             new_right = self.child_right.replace_with_list(replacement_list)
@@ -412,7 +474,9 @@ class Statement:
             new_simplification = simplification.replace_with_list(replacement_list)
 
             # Replace match_statement with simplification
-            yield new_self._static_simplify(new_match, new_simplification)
+            res = new_self._static_simplify(new_match, new_simplification)
+            res = canonicalize_ac(res)
+            yield res
 
 
 @dataclass(frozen=True, eq=False)
@@ -421,6 +485,7 @@ class MetaObject:
     obj_type: type
     name: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     negated: bool = False
+    globaly_defined: bool = False
 
     def is_of_type(self, target_type: type) -> bool:
         return issubclass(self.obj_type, target_type)
@@ -534,7 +599,6 @@ def canonicalize_ac(statement: Statement) -> Statement:
                     flattened_statements[j], flattened_statements[j + 1] = flattened_statements[j + 1], flattened_statements[j]
 
     return rebuild(statement.node_function, flattened_statements)
-
 
 def flatten(statement: Statement) -> List[Statement]:
     """ Returns a flattened list of statement arguments that have the specific node_function """
@@ -657,8 +721,13 @@ def _ordered_replacement_tuple(obj1: Statement, obj2: Statement) -> Union[Tuple[
     return obj2, obj1
 
 def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) -> Tuple[List[Tuple[Statement, Statement]], bool]:
-    """ Checks if any key is used twice with different values. On already seen replacements (A, B) & (A, C), try to find replacement (B, C) or (C, B) """
+    """
+    Checks if any key is used twice with different values.
+    On already seen replacements (A, B) & (A, C), try to find replacement (B, C) or (C, B)
+    If old x was dependet on old y and new y is dependet on new x then the list is invalid as well
+    """
     # TODO: Can we update to only id search to increase runtime from O(n^2) to O(n)?
+    # TODO: Implement quantor order logic check!!!
     updated_lst = []
     updated_lst_id_pairings = set()
 
@@ -673,6 +742,14 @@ def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) 
         if not key or not value:
             return [], False
 
+        # If value is a MetaObject, create new metaObject for non-conflicting behavior
+        if isinstance(value.node_function, MetaObject):
+            old_meta = value.node_function
+            new_value = Statement(MetaObject(obj_type=old_meta.obj_type, negated=old_meta.negated, globaly_defined=old_meta.globaly_defined))
+            add_to_updated(value, new_value)
+            value = new_value
+
+        # Duplicate check
         for old_key, old_value in updated_lst:
             # Special-case: Can't substiture A with something and at the same time the logical negation that is unequal
             if isinstance(key.node_function, MetaObject) and isinstance(old_key.node_function, MetaObject):
@@ -725,7 +802,59 @@ def _replacement_list_valid(replacement_lst: List[Tuple[Statement, Statement]]) 
                     if (id(old_key), id(old_value)) in updated_lst_id_pairings: updated_lst.remove((old_key, old_value))
                     add_to_updated(key, value)
 
-
         add_to_updated(key, value)
 
     return updated_lst, True
+
+
+def _canonicalize_prefix(prefix: Tuple[Union[Object, MetaObject], ...]) -> Tuple[Union[Object, MetaObject], ...]:
+    """ Returns a canocialized version of a prefix definiton tuple (by id values) """
+    if not prefix:
+        return ()
+
+    # Note: Only objects with the same quantor can be swapped
+    # Get equal quantor subsequences
+    equal_quantor_sub_sequences = []
+    current_subsequence = [prefix[0]]
+    sub_sequence_quantor = Quantor.FORALL if isinstance(prefix[0], MetaObject) else prefix[0].quantor
+
+    for obj in prefix[1:]:
+        # Meta objects have allquantor
+        if isinstance(obj, MetaObject) and sub_sequence_quantor is Quantor.FORALL:
+            current_subsequence.append(obj)
+
+        elif obj.quantor is Quantor.FORALL and sub_sequence_quantor is Quantor.FORALL:
+            current_subsequence.append(obj)
+
+        elif obj.quantor is not Quantor.FORALL and sub_sequence_quantor is not Quantor.FORALL:
+            current_subsequence.append(obj)
+
+        else:
+            if current_subsequence:
+                equal_quantor_sub_sequences.append(current_subsequence)
+
+            current_subsequence = [obj]
+            if isinstance(obj, MetaObject):
+                sub_sequence_quantor = Quantor.FORALL
+            else:
+                sub_sequence_quantor = obj.quantor
+    equal_quantor_sub_sequences.append(current_subsequence)
+
+    # Sort subsequences by id
+    equal_quantor_sub_sequences = [sorted(sequence, key=lambda x: id(x)) for sequence in equal_quantor_sub_sequences]
+
+    flattened_result: List[Union[Object, MetaObject]] = []
+    for sub_sequence in equal_quantor_sub_sequences:
+        flattened_result.extend(sub_sequence)
+
+    return tuple(flattened_result)
+
+def _update_prefix_on_replacement_list(prefix, replacement_list):
+    """ Updates prefix defintiions """
+    updated_prefix = list(prefix)
+    id_to_idx_dict = {id(obj): i for i, (obj, _) in enumerate(replacement_list)}
+    for i, obj in enumerate(prefix):
+        if id(obj) in id_to_idx_dict:
+            updated_prefix[i] = replacement_list[id_to_idx_dict[id(obj)]][1]
+
+    return tuple(updated_prefix)

@@ -1,3 +1,4 @@
+import time
 import pytest
 from ExpressionTree import Node, _get_cycle_nodes
 from MObject import Set, Function, Quantor

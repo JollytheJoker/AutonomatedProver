@@ -783,6 +783,7 @@ def _lcm_phase_reduction_valid(cycle1: List[Node], cycle2: List[Node], compariso
     try:
         lcm = math.lcm(cycle1_length, cycle2_length)
     except ValueError:
+        # TODO: Implement lcm on valued-expressions
         raise NotImplementedError("Comparisons of variable length edges is not yet supported")
 
     lcm_cycle_self = cycle1 * int(lcm / cycle1_length)

@@ -7,16 +7,15 @@ from MObject import Set, Function, Quantor
 from Statement import Statement, LogicalOperation, MetaObject, Bool, Relation
 from Knuth_Bendix_Algorithm import knuth_bendix_algorithm, kbo_compare, simplify_statement_on_system
 
-
 # ---------------------- BASIC AXIOMS ----------------------
 
 # (\land & \lor will be refered to 'o')#
 logical_axioms: List[Tuple[Statement, Statement]] = []
 
 # Define 3 placeholders
-a = Statement(MetaObject(Statement, name='A'))
-b = Statement(MetaObject(Statement, name='B'))
-c = Statement(MetaObject(Statement, name='C'))
+a = Statement(MetaObject(Statement, name='A', globaly_defined=True))
+b = Statement(MetaObject(Statement, name='B', globaly_defined=True))
+c = Statement(MetaObject(Statement, name='C', globaly_defined=True))
 
 # AXIOMS
 # a xor false = a
@@ -75,7 +74,7 @@ print(simplify_fully(test_statement, system))"""
 # ---------------------- RELATIONAL DEFINITIONS ----------------------
 def transitiv(r: Union[Relation, LogicalOperation]) -> Statement:
     """ Returns the statement that a relation is transitiv """
-    A, B, C = MetaObject(Statement), MetaObject(Statement), MetaObject(Statement)
+    A, B, C = MetaObject(Statement, globaly_defined=True), MetaObject(Statement, globaly_defined=True), MetaObject(Statement, globaly_defined=True)
     arb = Statement(r, Statement(A), Statement(B))
     brc = Statement(r, Statement(B), Statement(C))
     arc = Statement(r, Statement(A), Statement(C))
@@ -90,8 +89,8 @@ def inverse(f: Union[Function, Node]) -> Tuple[Union[Function, Node], Tuple[Stat
         out_set = f.output_set
 
         f_inv = replace(f, binding_quantity=(out_set, in_set), association=f'{f.association}^-1')
-        in_el = Set((in_set,), Quantor.FORALL, '', 0)
-        out_el = Set((out_set,), Quantor.FORALL, '', 0)
+        in_el = Set(binding_quantity=(in_set,), quantor=Quantor.FORALL, nested_depth=0)
+        out_el = Set(binding_quantity=(out_set,), quantor=Quantor.FORALL, nested_depth=0)
 
         f_node = Node(f)
         f_inv_node = Node(f_inv)
@@ -99,10 +98,10 @@ def inverse(f: Union[Function, Node]) -> Tuple[Union[Function, Node], Tuple[Stat
         out_el_node = Node(out_el)
 
         # f^-1(f(x)) = x
-        A = Statement(Relation.EQUAL, Statement(f_inv_node(f_node(in_el_node))), Statement(in_el_node))
+        A = Statement(Relation.EQUAL, Statement(f_inv_node(f_node(in_el_node))), Statement(in_el_node), definition_prefix=(in_el,))
 
         # f(f^-1(y)) = y
-        B = Statement(Relation.EQUAL, Statement(f_node(f_inv_node(out_el_node))), Statement(out_el_node))
+        B = Statement(Relation.EQUAL, Statement(f_node(f_inv_node(out_el_node))), Statement(out_el_node), definition_prefix=(out_el,))
 
         return f_inv, (Statement(LogicalOperation.AND, A, B), )
 
@@ -186,7 +185,7 @@ def topolgy(X: Set) -> Set:
         raise Exception('X is not true set (most likely variable)')
 
     if not X.binding_quantity:
-        return Set(binding_quantity=(X, ), nested_depth=2)
+        return Set(binding_quantity=(X, ), nested_depth=2, quantor=Quantor.DEFINE)
     return replace(X, nested_depth=X.nested_depth + 1)
 
 def _is_topology(X: Set, tau: Set) -> bool:
@@ -224,7 +223,7 @@ def continuous(f: Union[Function, Node], topology_in: Set, topology_out: Set, f_
     # U open
     u_in = Statement(Relation.ELEMENTOF, Statement(Node(U)), Statement(Node(topology_out)))
 
-    # f^-1(U) open
+    # f^-1(U) in tau
     if isinstance(f, Function):
         f_inv_u_graph = GraphBuilder()
         U_node = f_inv_u_graph.add_node(U, 0)
@@ -238,7 +237,7 @@ def continuous(f: Union[Function, Node], topology_in: Set, topology_out: Set, f_
     else:
         f_in = Statement(Relation.ELEMENTOF, Statement(_apply_on_function(f_inv, U)), Statement(Node(topology_in)))
 
-    return Statement(LogicalOperation.IMPLIES, u_in, f_in), inv_conditions
+    return Statement(LogicalOperation.IMPLIES, u_in, f_in, definition_prefix=(U,)), inv_conditions
 
 
 # HELPER
@@ -266,4 +265,9 @@ def _apply_on_function(f: Node, x: Union[Function, Set]) -> Node:
 
 
 # UNORDERED TUPLES FOR DEFINITION UNFOLDING
-DEFINITIONS: List[Tuple[Statement | Statement]] = []
+DEFINITIONS: List[Tuple[Statement, Statement]] = []
+
+# A => B ≡ not(A) or B
+a = Statement(MetaObject(Statement, globaly_defined=True))
+b = Statement(MetaObject(Statement, globaly_defined=True))
+DEFINITIONS.append((Statement(LogicalOperation.IMPLIES, a, b), Statement(LogicalOperation.OR, a.negation, b)))

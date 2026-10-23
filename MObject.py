@@ -28,6 +28,7 @@ def _generate_id(binding: Tuple[Object, ...], quantor: Quantor) -> int:
 
 @dataclass(frozen=True)
 class Object(ABC):
+    # TODO: Implement sort of meta objects: How to define Union function otherwise
     """Represents a mathematical object in the discourse space.
 
     Attributes:

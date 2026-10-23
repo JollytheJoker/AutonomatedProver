@@ -1,4 +1,5 @@
 import copy
+from functools import reduce
 from typing import List, Tuple, Set, Union
 
 from Knuth_Bendix_Algorithm import reducde_statement_modulo_directed_axioms
@@ -32,12 +33,17 @@ class Prove:
 
 class Prover:
     def __init__(self, statements: Tuple[Statement, ...] = (), initial_state: Statement = None):
+        # Check that all statements are valid according to their definitions
+        '''for statement in statements + (initial_state, ):
+            if not statement.requiered_definitions_given():
+                raise Exception(f"{", ".join(str(obj) for obj in statement.scope_requiered_definitions - (set(statement.higher_scope_definitions) | set(statement.definition_prefix)))} is/are not defined, but must be defined at this scope-level: {statement}")
+'''
         self.statements: Tuple[Statement, ...] = statements
         self.goal_statement: Statement | None = initial_state
 
-    def prove(self, print_trace: bool = False) -> Tuple[Union[Prove, None], ...]:
+    def prove(self, print_trace: bool = False, indent: int = 0) -> Tuple[Union[Prove, None], ...]:
         """ Runs search algorithm on state space to find prove for the goal statement """
-        # Create sub-proof tasks on logical operations
+        '''# Create sub-proof tasks on logical operations
         def find_substatements(sub_statement: Statement) -> List[Statement]:
             # TODO: What if an object is dependent over logical operator (exists x in R: x = 0 and x = 1 is false, but exsits x = 0 in R and exists x = 1 in R is true)
             if isinstance(sub_statement.node_function, LogicalOperation) and not (sub_statement.node_function == LogicalOperation.IMPLIES or sub_statement.node_function == LogicalOperation.IMPLIEDBY):
@@ -56,7 +62,7 @@ class Prover:
                     return ()
                 proves.append(sub_statement_prover)
 
-            return tuple(proves)
+            return tuple(proves)'''
 
         # Self has non-logical operation as node_function (or implies)
         # TODO: Implement Defintion unfolding
@@ -100,6 +106,23 @@ class Prover:
                         if print_trace: print(f"Add {new_statement}")
                         queue.append(new_state)
                         visited.add(new_state)
+
+        # Try definition unfolding
+        for given, unfolded in DEFINITIONS:
+            for simplified in self.goal_statement.simplify(given, unfolded):
+                simplified = reducde_statement_modulo_directed_axioms(simplified, logical_axioms)
+                if self.goal_statement != simplified:
+                    # Try to prove simplified statements
+                    unfolded_statements = []
+                    for statement in self.statements:
+                        statement = reducde_statement_modulo_directed_axioms(statement, logical_axioms)
+                        unfolded_statements.append(statement.simplify(given, unfolded))
+
+                    print("   " * indent, "->", self.goal_statement)
+                    unfolded_prover = Prover(tuple(unfolded_statements), simplified)
+                    res = unfolded_prover.prove(indent=indent + 1)
+                    if res != (None, ):
+                        return res
 
         return (None, )
 
