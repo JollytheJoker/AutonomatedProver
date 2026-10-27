@@ -19,6 +19,10 @@ b = Statement(MetaObject(Statement, name='B'))
 c = Statement(MetaObject(Statement, name='C'))
 
 # AXIOMS
+# a xor true = not a
+lhs = Statement(LogicalOperation.XOR, a, Statement(Bool.TRUE))
+logical_axioms.append((lhs.canonical, a.negation))
+
 # a xor false = a
 lhs = Statement(LogicalOperation.XOR, a, Statement(Bool.FALSE))
 logical_axioms.append((lhs.canonical, a))
@@ -26,6 +30,10 @@ logical_axioms.append((lhs.canonical, a))
 # a xor a = false
 lhs = Statement(LogicalOperation.XOR, a, a)
 logical_axioms.append((lhs.canonical, Statement(Bool.FALSE)))
+
+# a xor not a = true
+lhs = Statement(LogicalOperation.XOR, a, a.negation)
+logical_axioms.append((lhs.canonical, Statement(Bool.TRUE)))
 
 # a and true = a
 lhs = Statement(LogicalOperation.AND, a, Statement(Bool.TRUE))
@@ -39,6 +47,10 @@ logical_axioms.append((lhs.canonical, Statement(Bool.FALSE)))
 lhs = Statement(LogicalOperation.AND, a, a)
 logical_axioms.append((lhs.canonical, a))
 
+# a and not a = false
+lhs = Statement(LogicalOperation.AND, a, a.negation)
+logical_axioms.append((lhs.canonical, Statement(Bool.FALSE)))
+
 # Distibutivity (a xor b) and c = (a and c) xor (b and c)
 lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.XOR, a, b), c)
 rhs = Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, a, c), Statement(LogicalOperation.AND, b, c))
@@ -47,6 +59,10 @@ logical_axioms.append((lhs.canonical, rhs.canonical))
 # Ambiguous axioms
 # a => ~ = a
 lhs = Statement(LogicalOperation.IMPLIES, a, Statement(Bool.AMBIGUOUS))
+logical_axioms.append((lhs.canonical, a))
+
+# a \equiv ~ = a
+lhs = Statement(LogicalOperation.EQUAL, a, Statement(Bool.AMBIGUOUS))
 logical_axioms.append((lhs.canonical, a))
 
 # a and ~ = ~ (at the start)
@@ -72,6 +88,7 @@ print(simplify_fully(test_statement, system))"""
 
 # TODO: INGEGER DEFINITIONS AND OPERATIONS
 
+
 # ---------------------- RELATIONAL DEFINITIONS ----------------------
 def transitiv(r: Union[Relation, LogicalOperation]) -> Statement:
     """ Returns the statement that a relation is transitiv """
@@ -81,6 +98,7 @@ def transitiv(r: Union[Relation, LogicalOperation]) -> Statement:
     arc = Statement(r, Statement(A), Statement(C))
 
     return Statement(LogicalOperation.IMPLIES, Statement(LogicalOperation.AND, arb, brc), arc)
+
 
 # ---------------------- SET & FUNCTIONAL DEFINITIONS ----------------------
 def inverse(f: Union[Function, Node]) -> Tuple[Union[Function, Node], Tuple[Statement, ...]]:

@@ -6,7 +6,6 @@ from MObject import Function, Set, Quantor
 from CommonStatements import continuous, DEFINITIONS, topolgy, _is_topology, transitiv, logical_axioms, inverse
 from ExpressionTree import Node
 from Statement import Relation, LogicalOperation, Bool, Statement, canonicalize_ac
-from Knuth_Bendix_Algorithm import reducde_statement_modulo_directed_axioms
 
 
 def test_prove_on_continuity():
@@ -56,3 +55,6 @@ def test_prove_on_continuity():
 
     assert prover.prove() != (None, )
 
+    insufficient_prover = [Prover((), cgf), Prover((cf, ), cgf), Prover((cg, ), cgf), Prover((trans, ), cgf), Prover((cf, cg), cgf), Prover((cf, trans), cgf), Prover((cg, trans), cgf)]
+    for u_prover in insufficient_prover:
+        assert u_prover.prove() == (None, )

@@ -1,5 +1,5 @@
 from typing import List, Tuple, Set
-from Statement import Statement, kbo_compare
+from Statement import Statement, kbo_compare, create_shadow_version
 
 
 def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> List[Tuple[Statement, Statement]]:
@@ -17,7 +17,8 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
         try:
             processing.remove((s, t))
             seen.add((s, t))
-        except KeyError: pass
+        except KeyError:
+            pass
 
         # Simplify on the current rule book
         simplify_fully(s, temporary_res)
@@ -38,7 +39,6 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
             case _:
                 raise Exception(f'{str(s)}={str(t)} on KBO-Basis')
 
-
         # Generate critical pairs
         for rule in temporary_res[:-1]:
             extention = _get_critical_pairs_for_rules(rule, new_rule)
@@ -51,17 +51,11 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
 
                 # Only add if the statements in reduced form are unequal
                 if p1 != p2 and (p1, p2) not in processing:
-                    print("Critical pair found: ", p1, p2)
-                    print(f"{s}, {t} \n")
                     critical_pairs.append((p1, p2))
                     processing.add((p1, p2))
 
             axiom_system.extend(critical_pairs)
 
-    for val, key in temporary_res:
-        print(val, '->', key)
-
-    print()
     # Clear redudantent rules by simplifing
     final_rule_system = []
 
@@ -84,7 +78,8 @@ def knuth_bendix_algorithm(axiom_system: List[Tuple[Statement, Statement]]) -> L
     return final_rule_system
 
 
-def _get_critical_pairs_for_rules(rule1: Tuple[Statement, Statement], rule2: Tuple[Statement, Statement]) -> List[Tuple[Statement, Statement]]:
+def _get_critical_pairs_for_rules(rule1: Tuple[Statement, Statement], rule2: Tuple[Statement, Statement]) -> List[
+    Tuple[Statement, Statement]]:
     """ Generates all the critical pairs within two rules by comparing their leftside structure """
     critical_pairs = []
     for rule2_application in rule1[0].simplify(rule2[0], rule2[1]):
@@ -96,6 +91,7 @@ def _get_critical_pairs_for_rules(rule1: Tuple[Statement, Statement], rule2: Tup
             critical_pairs.append((rule2[1], rule1_application))
 
     return critical_pairs
+
 
 def simplify_statement_on_system(s: Statement, system: List[Tuple[Statement, Statement]]):
     for (statement, reduction) in system:
@@ -111,6 +107,7 @@ def simplify_statement_on_system(s: Statement, system: List[Tuple[Statement, Sta
 
     return s
 
+
 def simplify_fully(s: Statement, system: List[Tuple[Statement, Statement]]):
     s_old = s
     while (s_new := simplify_statement_on_system(s_old, system)) != s_old:
@@ -121,26 +118,63 @@ def simplify_fully(s: Statement, system: List[Tuple[Statement, Statement]]):
 def reducde_statement_modulo_directed_axioms(statement: Statement, system: List[Tuple[Statement, Statement]]):
     s_old = statement
     s_new = statement
-    for (s, t) in system:
-        # Since a system is conflouent we can just take the next simplification
+
+    def simplify(_s, _t):
+        # Since a system is confluent we can just take the next simplification
         try:
-            s_new = next(s_new.simplify(s, t))
+            return next(s_new.simplify(_s, _t, allow_self_node_size_increase=False, allow_bool_val_replacement=2))
         except StopIteration:
-            pass
+            return s_new
+
+    for s, t in system:
+        s_new = simplify(*create_shadow_version(s, t))
 
     while s_new != s_old:
         s_old = s_new
 
-        for (s, t) in system:
-            # Since a system is conflouent we can just take the next simplification
-            try:
-                s_new = next(s_new.simplify(s, t))
-            except StopIteration:
-                pass
+        for s, t in system:
+            s_new = simplify(*create_shadow_version(s, t))
 
     return s_new
 
 
+def reducde_statement_modulo_directed_axioms_return_replacement_list(statement: Statement, system: List[Tuple[Statement, Statement]], allow_boolean_replacement: bool = True) -> Tuple[Statement, List[Tuple[Statement, Statement]]]:
+    s_old = statement
+    s_new = statement
+    replacement_list = []
 
+    def simplify(_s, _t):
+        # Since a system is confluent we can just take the next simplification
+        try:
+            return next(s_new.simplify_return_replacement_list(_s, _t, allow_self_node_size_increase=False, allow_bool_val_replacement=2 if allow_boolean_replacement else 0))
+        except StopIteration:
+            return s_new, []
 
+    for s, t in system:
+        s_new, replacement_list_tmp = simplify(*create_shadow_version(s, t))
+        replacement_list.extend(replacement_list_tmp)
 
+    while s_new != s_old:
+        s_old = s_new
+
+        for s, t in system:
+            s_new, replacement_list_tmp = simplify(*create_shadow_version(s, t))
+            replacement_list.extend(replacement_list_tmp)
+
+    # Fix replacement list
+    '''fixed_replacement_list = []
+    for s, t in replacement_list:
+        t_prev = t
+        t_new = t.replace_with_list(replacement_list)
+
+        while t_prev != t_new:
+            t_prev = t_new
+            t_new = t_new.replace_with_list(replacement_list)
+
+        if t != t_new:
+            t_red, rep = reducde_statement_modulo_directed_axioms_return_replacement_list(t_new, system, False)
+            fixed_replacement_list.append((s, t_red.reverse_replace(rep)))
+        else:
+            fixed_replacement_list.append((s, t))'''
+
+    return s_new, replacement_list

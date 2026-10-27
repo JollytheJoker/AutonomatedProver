@@ -67,4 +67,9 @@ Statement(LogicalOperation.EQUAL,
                     Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, P, R), Statement(LogicalOperation.AND, P, S)),
                     Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, Q, R), Statement(LogicalOperation.AND, Q, S))))
 
-# (P \land Q)
+# (P \land Q) \land (P xor Q)
+Statement(LogicalOperation.AND,
+          Statement(LogicalOperation.AND, P, Q),
+          Statement(LogicalOperation.XOR, P, Q))
+
+

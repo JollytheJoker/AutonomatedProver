@@ -1,6 +1,9 @@
+import copy
+from copy import replace
 from typing import List, Tuple
-from Statement import Statement, LogicalOperation, MetaObject, Bool
-
+from Prover import find_implicit_simplifications_from_axioms_definitions
+from Statement import Statement, LogicalOperation, MetaObject, Bool, create_shadow_version, generate_ac_invariants, \
+    OPERATION_PROPERTIES, OperationProperties
 
 """
 ---------- LOGICAL DEFINITIONS ---------- 
@@ -76,13 +79,97 @@ lhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.XOR, P, Q), R)
 rhs = Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, P, R), Statement(LogicalOperation.AND, Q, R))
 logical_axioms.append((lhs.canonical, rhs.canonical))
 
-# (P and Q) xor R \equiv (P xor R) and (Q xor R)
-lhs = Statement(LogicalOperation.XOR, Statement(LogicalOperation.AND, P, Q), R)
-rhs = Statement(LogicalOperation.AND, Statement(LogicalOperation.XOR, P, R), Statement(LogicalOperation.XOR, Q, R))
-logical_axioms.append((lhs.canonical, rhs.canonical))
-
 
 """
 ---------- LOGICAL IMPLICATIONS ----------
 Results from axioms on (xor, and, not) for all defined operations
 """
+implicit_axioms = []
+mapped_s = set()
+for i in range(len(logical_definitions)):
+    # Check for operation properties
+    operation = logical_definitions[i][0]
+    definition = logical_definitions[i][1]
+
+    # Commutativity
+    commutative = False
+
+    original = definition.canonical
+    switched = definition.replace_with_list([
+                                (operation.child_left, operation.child_right),
+                                (operation.child_right, operation.child_left),
+                                (operation.child_left.negation, operation.child_right.negation),
+                                (operation.child_right.negation, operation.child_left.negation)
+    ])
+    switched = switched.canonical
+
+    if switched == original:
+        print(f"{operation} is commutative")
+        commutative = True
+
+    # Associativity
+    associative = False
+    '''parent_operation, parent_definition = create_shadow_version(operation, definition)
+    child_node, child_definition = create_shadow_version(operation, definition)
+
+    # Version 1 (child_node in left of parent)
+    version1 = parent_definition.replace_with_list([
+        (parent_operation.child_left, child_definition),
+        (parent_operation.child_left.negation, child_definition.negation)
+    ])
+    version1 = version1
+
+    # Version 2 (lots of substitutions)
+    version2_child = child_definition.replace_with_list([
+        (child_node.child_left, child_node.child_right),
+        (child_node.child_right, parent_operation.child_right),
+        (child_node.child_left.negation, child_node.child_right.negation),
+        (child_node.child_right.negation, parent_operation.child_right.negation)
+    ])
+    version2_child = version2_child
+
+    version2 = parent_definition.replace_with_list([
+        (parent_operation.child_left, child_node.child_left),
+        (parent_operation.child_right, version2_child),
+        (parent_operation.child_left.negation, child_node.child_left.negation),
+        (parent_operation.child_right.negation, version2_child.negation)
+    ])
+    version2 = version2
+
+    print()
+    print("Parent_operation: ", parent_operation)
+    print("child_node: ", child_node)
+    print("Version 1: ", version1)
+    print(parent_operation.replace_with_list([
+        (parent_operation.child_left, child_node),
+        (parent_operation.child_left.negation, child_node.negation)
+    ]).canonical)
+    print("Version 2: ", version2)
+    child2 = child_node.replace_with_list([
+        (child_node.child_left, child_node.child_right),
+        (child_node.child_right, parent_operation.child_right),
+        (child_node.child_left.negation, child_node.child_right.negation),
+        (child_node.child_right.negation, parent_operation.child_right.negation)
+    ])
+    print(parent_operation.replace_with_list([
+        (parent_operation.child_left, child_node.child_left),
+        (parent_operation.child_right, child2),
+        (parent_operation.child_left.negation, child_node.child_left.negation),
+        (parent_operation.child_right.negation, child2.negation)
+    ]).canonical)'''
+
+    OPERATION_PROPERTIES[operation.node_function] = OperationProperties(associative=associative, commutative=commutative)
+
+    for j in range(len(logical_axioms)):
+        shadow_def = create_shadow_version(logical_definitions[i][0], logical_definitions[i][1])
+        shadow_ax = create_shadow_version(logical_axioms[j][0], logical_axioms[j][1])
+
+        for s, t in find_implicit_simplifications_from_axioms_definitions(shadow_def[0], shadow_def[1], shadow_ax[0], shadow_ax[1]):
+            if s.nameless_hash not in mapped_s:
+                mapped_s.add(s.nameless_hash)
+                implicit_axioms.append((s, t))
+
+print(f"Found {len(implicit_axioms)} direct implications from axioms")
+for s, t in implicit_axioms:
+    print(f"{s}->{t}")
+

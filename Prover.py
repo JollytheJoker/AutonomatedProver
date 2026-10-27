@@ -1,8 +1,10 @@
 import copy
-from typing import List, Tuple, Set, Union
+from typing import List, Tuple, Set, Union, Generator
 
-from Knuth_Bendix_Algorithm import reducde_statement_modulo_directed_axioms
-from Statement import Statement, Relation, LogicalOperation, Bool, canonicalize_ac
+from Knuth_Bendix_Algorithm import reducde_statement_modulo_directed_axioms, \
+    reducde_statement_modulo_directed_axioms_return_replacement_list
+from Statement import Statement, Relation, LogicalOperation, Bool, canonicalize_ac, kbo_compare, MetaObject, \
+    OPERATION_PROPERTIES, generate_ac_invariants
 from collections import deque
 from CommonStatements import DEFINITIONS, logical_axioms
 
@@ -65,15 +67,15 @@ class Prover:
         depth = 1
 
         while queue:
-            if print_trace: print("-" * 15 + f" DEPTH = {depth} " + "-" * 15)
-
             state = queue.popleft()
+            if print_trace: print("-" * 15 + f" {state.current_statement} " + "-" * 15)
 
             # If the state is true, then we have finished the proof
             if state.current_statement == Statement(Bool.TRUE):
                 return (state, )
 
             for statement in list(set(self.statements) - set(state.transformations)):
+                if print_trace: print("-" * 5 + f" {statement} " + "-" * 5)
                 # Update statespace
                 # Option 1: simplify state with statement
                 for new_statement in state.current_statement.simplify(statement, Statement(Bool.TRUE)):
@@ -108,3 +110,42 @@ def update_relation(input_statement: Statement, to_relation: Relation) -> Statem
     """ Tries to update statements relation to given relation according to relation hierarchy """
     # TODO
     return input_statement
+
+
+def find_implicit_simplifications_from_axioms_definitions(definition_obj: Statement, definition_expr: Statement, axiom_obj: Statement, axiom_simplification: Statement) -> Generator[Union[Statement, None]]:
+    """
+    Uses the given axiom to replace things in given definition to find implicit simplification on definition.
+    E.g. P | F = P is not axiomatically defined but can be found by this function.
+    definition_obj : the object that go defined (e.g. P | Q)
+    definition_expr : the objects definition (e.g. (P xor Q) xor (P and Q))
+    axiom_obj : the axiom object that can be written differently (e.g. P xor F)
+    axiom_simplification : the following simplification for the axiom_obj (e.g. P)
+    """
+    # Here we also use the not-canonical version of the axiom for replacements
+    for invariant in generate_ac_invariants(axiom_obj):
+        # Try to use Axiom to simplify definition_expr
+        for axiom_replaced_version, replacement_list_tmp in definition_expr.simplify_return_replacement_list(invariant, axiom_simplification, allow_bool_val_replacement=True):
+            # We don't want to identify the entire axiom with just one metaobject, this would be redundant
+            if any(isinstance(s.node_function, MetaObject) and t == invariant for s, t in replacement_list_tmp):
+                continue
+
+            # Replace definition obj accordingly
+            original_replaced = definition_obj.replace_with_list(replacement_list_tmp)
+
+            # Simplify over other axioms (here we can't replace metaobjects with boolean values)
+            final_version, replacement_list = reducde_statement_modulo_directed_axioms_return_replacement_list(axiom_replaced_version, logical_axioms)
+
+            # Apply replacement to other for as long as it changes
+            original_replaced = original_replaced.strong_replace_with_list(replacement_list)
+
+            # Repeat reduction phase on original
+            original_replaced, replacement_list = reducde_statement_modulo_directed_axioms_return_replacement_list(original_replaced, logical_axioms)
+            final_version = final_version.strong_replace_with_list(replacement_list)
+
+            # Canonicalize
+            original_replaced = original_replaced.canonical
+            final_version = final_version.canonical
+
+            # Check kbo weights
+            if kbo_compare(original_replaced, final_version) > 0:
+                yield original_replaced, final_version
